@@ -1,0 +1,1184 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>減重筆針精算與療程規劃器</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script>
+        const DEFAULT_PRICES = {
+            mounjaro: { 2.5: 9500, 5: 9500, 7.5: 13200, 10: 13200 },
+            wegovy: { 0.5: 6800, 1: 6800, 1.7: 11000, 2.4: 14800 }
+        };
+        const MED_CONFIG = {
+            mounjaro: {
+                name: '猛健樂 (Mounjaro)',
+                targetDoses: [2.5, 5, 7.5, 10, 12.5, 15],
+                buyDoses: [2.5, 5, 7.5, 10],
+                getMaxClicks: (dose) => 60,
+            },
+            wegovy: {
+                name: '週纖達 (Wegovy)',
+                targetDoses: [0.25, 0.5, 1.0, 1.7, 2.4],
+                buyDoses: [0.5, 1.0, 1.7, 2.4],
+                getMaxClicks: (dose) => (dose <= 0.5 ? 36 : 72)
+            }
+        };
+        function app() {
+            return {
+                activeTab: 'progression',
+                prices: JSON.parse(JSON.stringify(DEFAULT_PRICES)),
+                showSettings: false,
+                isFirstConservative: true,
+                medConfig: MED_CONFIG,
+                progMed: 'mounjaro',
+                progTarget: 10,
+                progMaxWeeks: 6,
+                progStrategy: 'balanced',
+                progSubsidy: 'none',
+                progPens: [],
+                progLimitPens: false,
+                progPenLimit: 3,
+                customMed: 'wegovy',
+                customStart: 0.5,
+                customPeak: 1.7,
+                customBlocks: [],
+                customStrategy: 'balanced',
+                customMaxWeeks: 6,
+                customSubsidy: 'none',
+                customPens: [],
+                customLimitPens: false,
+                customPenLimit: 3,
+                singleMed: 'wegovy',
+                targetDose: 0.25,
+                buyDose: 1.0,
+                penCount: 1,
+                penToEmpty: true,
+                showSubsidyTimer: false,
+                timerPen1Date: '',
+                timerPen3Date: '',
+
+                init() {
+                    this.updateCustomBlocks();
+                    this.updateProgPens();
+                    this.updateCustomPens();
+                    this.$watch('progMed', (val) => {
+                        this.progTarget = MED_CONFIG[val].targetDoses[Math.floor(MED_CONFIG[val].targetDoses.length / 2)];
+                        this.progStrategy = 'balanced';
+                        this.progSubsidy = 'none';
+                        this.updateProgPens();
+                    });
+                    this.$watch('progTarget', () => { if (this.progStrategy === 'custom') this.progStrategy = 'balanced'; this.updateProgPens(); });
+                    this.$watch('progStrategy', (val) => { if (val !== 'custom') this.updateProgPens(); });
+                    this.$watch('progMaxWeeks', () => { if (this.progStrategy !== 'custom') this.updateProgPens(); });
+                    this.$watch('isFirstConservative', () => {
+                        if (this.progStrategy !== 'custom') this.updateProgPens();
+                        if (this.customStrategy !== 'custom') this.updateCustomPens();
+                    });
+                    this.$watch('prices', () => {
+                        if (this.progStrategy !== 'custom') this.updateProgPens();
+                        if (this.customStrategy !== 'custom') this.updateCustomPens();
+                    }, { deep: true });
+                    this.$watch('customMed', (val) => { this.customSubsidy = 'none'; this.customStrategy = 'balanced'; this.updateCustomBlocks(); });
+                    this.$watch('customStart', () => this.updateCustomBlocks());
+                    this.$watch('customPeak', () => this.updateCustomBlocks());
+                    this.$watch('customStrategy', (val) => { if (val !== 'custom') this.updateCustomPens(); });
+                    this.$watch('customMaxWeeks', () => { if (this.customStrategy !== 'custom') this.updateCustomPens(); });
+                },
+
+                setProgMed(med) { this.progMed = med; },
+                setCustomMed(med) { this.customMed = med; },
+                setSingleMed(med) { this.singleMed = med; this.targetDose = MED_CONFIG[med].targetDoses[0]; this.buyDose = MED_CONFIG[med].buyDoses[1] || MED_CONFIG[med].buyDoses[0]; },
+                setProgStrategy(s) { this.progStrategy = s; },
+                setCustomStrategy(s) { this.customStrategy = s; },
+
+                updateCustomBlocks() {
+                    const doses = MED_CONFIG[this.customMed].targetDoses;
+                    let sDose = this.customStart, pDose = this.customPeak;
+                    if (!doses.includes(sDose)) sDose = doses[0];
+                    if (!doses.includes(pDose)) pDose = doses[Math.floor(doses.length / 2)];
+                    this.customStart = sDose; this.customPeak = pDose;
+                    let idxA = doses.indexOf(sDose), idxB = doses.indexOf(pDose), blocks = [];
+                    if (idxA < idxB) {
+                        for (let i = idxA; i < idxB; i++) blocks.push({ id: `up_${doses[i]}`, phase: '遞增期', dose: doses[i], weeks: 4 });
+                        blocks.push({ id: `main_${doses[idxB]}`, phase: '維持期', dose: doses[idxB], weeks: 4 });
+                    } else if (idxA > idxB) {
+                        for (let i = idxA; i > idxB; i--) blocks.push({ id: `down_${doses[i]}`, phase: '遞減期', dose: doses[i], weeks: 4 });
+                        blocks.push({ id: `main_${doses[idxB]}`, phase: '維持期', dose: doses[idxB], weeks: 4 });
+                    } else {
+                        blocks.push({ id: `main_${doses[idxA]}`, phase: '維持期', dose: doses[idxA], weeks: 4 });
+                    }
+                    this.customBlocks = blocks;
+                    this.updateCustomPens();
+                },
+
+                handleCustomBlockChange(index, weeks) { this.customBlocks[index].weeks = weeks; this.updateCustomPens(); },
+                updateProgPens() {
+                    const schedule = this.getProgressionSchedule(this.progMed, this.progTarget);
+                    this.progPens = this.generatePresetFromSchedule(this.progStrategy, this.progMed, schedule, this.progMaxWeeks, this.isFirstConservative);
+                },
+                updateCustomPens() { this.customPens = this.generatePresetFromSchedule(this.customStrategy, this.customMed, this.customSchedule, this.customMaxWeeks, this.isFirstConservative); },
+
+                get customSchedule() {
+                    let s = [];
+                    this.customBlocks.forEach(b => { for (let i = 0; i < b.weeks; i++) s.push(b.dose); });
+                    return s;
+                },
+                get progPlan() {
+                    const schedule = this.getProgressionSchedule(this.progMed, this.progTarget);
+                    return this.calculatePlanEngine(this.progMed, schedule, this.progPens, this.prices, this.progSubsidy, this.progLimitPens ? Math.max(1, parseInt(this.progPenLimit) || 1) : 0);
+                },
+                get customPlan() { return this.calculatePlanEngine(this.customMed, this.customSchedule, this.customPens, this.prices, this.customSubsidy, this.customLimitPens ? Math.max(1, parseInt(this.customPenLimit) || 1) : 0); },
+                get singleCalc() {
+                    const config = MED_CONFIG[this.singleMed];
+                    const safeBuyDose = config.buyDoses.includes(this.buyDose) ? this.buyDose : config.buyDoses[0];
+                    const safeTargetDose = config.targetDoses.includes(this.targetDose) ? this.targetDose : config.targetDoses[0];
+                    const maxClicks = config.getMaxClicks(safeBuyDose);
+                    const clicksPerMg = maxClicks / safeBuyDose;
+                    const requiredClicks = Math.round(safeTargetDose * clicksPerMg);
+                    const totalMgInPen = safeBuyDose * 4;
+                    const weeksPerPen = totalMgInPen / safeTargetDose;
+                    const penPrice = this.prices[this.singleMed]?.[safeBuyDose] || 0;
+                    const costPerWeek = penPrice / weeksPerPen;
+                    const costPerMonth = costPerWeek * 4;
+                    let subsidy = null, subsidyWeekly = null;
+                    if (this.singleMed === 'wegovy') {
+                        subsidy = { buy6get3: ((penPrice*6)/9/weeksPerPen)*4||0, buy3get1: ((penPrice*3)/4/weeksPerPen)*4||0, buy3get2: ((penPrice*3)/5/weeksPerPen)*4||0 };
+                        subsidyWeekly = { buy6get3: ((penPrice*6)/9/weeksPerPen)||0, buy3get1: ((penPrice*3)/4/weeksPerPen)||0, buy3get2: ((penPrice*3)/5/weeksPerPen)||0 };
+                    }
+                    const requiredShotsForSingle = Math.ceil(weeksPerPen);
+                    const freeNeedlesForSingle = this.singleMed === 'wegovy' ? 4 : 0;
+                    const extraNeedlesForSingle = Math.max(0, requiredShotsForSingle - freeNeedlesForSingle);
+                    return { maxClicks, requiredClicks, weeksPerPen, penPrice, costPerWeek, costPerMonth, subsidy, subsidyWeekly, needsMultipleShots: requiredClicks > maxClicks, extraNeedles: extraNeedlesForSingle, safeBuyDose, safeTargetDose };
+                },
+
+                // ===== 以購買支數試算 (門診常見：病患決定買 N 支) =====
+                get multiPenCalc() {
+                    const sc = this.singleCalc;
+                    const n = Math.max(1, Math.min(24, parseInt(this.penCount) || 1));
+                    const C = sc.safeBuyDose * 4;            // 每支筆總含量 mg
+                    const T = sc.safeTargetDose;             // 每週目標劑量 mg
+                    if (T <= 0.001) return null;
+                    const maxClicks = sc.maxClicks, clicksPerMg = maxClicks / sc.safeBuyDose;
+                    // 逐週模擬：精確計算施打次數（含跨筆拆打、單週超過單次上限需分次）
+                    let pens = Array(n).fill(C), pi = 0, weeks = 0, shots = 0, crossWeeks = 0, finalPartialMg = 0;
+                    let guard = 0;
+                    while (pi < n && pens[pi] > 0.001 && guard < 1500) {
+                        guard++;
+                        let need = T, touched = 0, weekMg = 0;
+                        while (need > 0.001 && pi < n) {
+                            const used = Math.min(need, pens[pi]);
+                            pens[pi] -= used; need -= used; weekMg += used;
+                            // 此次從這支筆打出的量，依單次轉格上限換算需幾針
+                            shots += Math.max(1, Math.ceil(Math.round(used * clicksPerMg) / maxClicks));
+                            touched++;
+                            if (pens[pi] < 0.001 && need > 0.001) pi++;
+                        }
+                        weeks++;
+                        if (touched > 1) crossWeeks++;
+                        if (need > 0.001) finalPartialMg = weekMg;  // 最後一週藥不夠打滿目標
+                        if (pi < n && pens[pi] < 0.001) pi++;
+                    }
+                    const fullWeeks = finalPartialMg > 0.001 ? weeks - 1 : weeks;
+                    const totalCost = sc.penPrice * n;
+                    const avgWeekly = weeks > 0 ? totalCost / weeks : 0;
+                    const avgMonthly = avgWeekly * 4;
+                    const freeNeedles = this.singleMed === 'wegovy' ? n * 4 : 0;
+                    const extraNeedles = Math.max(0, shots - freeNeedles);
+                    let subsidyHint = null;
+                    if (this.singleMed === 'wegovy') {
+                        if (n >= 6) subsidyHint = '已達 6 支：可符合方案 B (買6送3) 或方案 A 兩輪申請門檻 (請依原廠規定確認)';
+                        else if (n >= 3) subsidyHint = '已達 3 支：可符合方案 A (買3送1 / 續購買3送2) 申請門檻 (請依原廠規定確認)';
+                        else subsidyHint = `再買 ${3 - n} 支即可達「買 3 送 N」補助申請門檻`;
+                    }
+                    return { n, totalCost, weeks, fullWeeks, finalPartialMg, totalMg: C * n, shots, crossWeeks, freeNeedles, extraNeedles, avgWeekly, avgMonthly, subsidyHint };
+                },
+
+                // ===== 週纖達補助時程試算 =====
+                addMonthsClamped(dateStr, months) {
+                    if (!dateStr) return null;
+                    const d = new Date(dateStr + 'T00:00:00');
+                    if (isNaN(d.getTime())) return null;
+                    const day = d.getDate();
+                    const t = new Date(d.getFullYear(), d.getMonth() + months, 1);
+                    const lastDay = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+                    t.setDate(Math.min(day, lastDay));
+                    return t;
+                },
+                addDays(dateStr, days) {
+                    if (!dateStr) return null;
+                    const d = new Date(dateStr + 'T00:00:00');
+                    if (isNaN(d.getTime())) return null;
+                    d.setDate(d.getDate() + days);
+                    return d;
+                },
+                fmtDate(d) {
+                    if (!d) return '—';
+                    const wd = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()];
+                    return `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日（週${wd}）`;
+                },
+                daysUntil(d) {
+                    if (!d) return null;
+                    const today = new Date(); today.setHours(0, 0, 0, 0);
+                    return Math.round((d.getTime() - today.getTime()) / 86400000);
+                },
+                get timerPen3Deadline() { return this.addMonthsClamped(this.timerPen1Date, 6); },
+                get timerApplyDeadline() { return this.addDays(this.timerPen3Date, 60); },
+                get subsidyTimerCheck() {
+                    let plan = null, src = '';
+                    if (this.activeTab === 'single') {
+                        return { status: 'none', title: '無法判斷', msg: '「單支精算機」分頁僅計算單支用量，不含完整療程排程。請切換到「標準遞增療程」或「自由編排模式」並選擇週纖達，再回來檢查補助資格。' };
+                    } else if (this.activeTab === 'progression') {
+                        if (this.progMed !== 'wegovy') return { status: 'notwegovy', title: '非週纖達療程', msg: '目前「標準遞增療程」分頁選擇的用藥不是週纖達，補助計畫僅適用週纖達。' };
+                        plan = this.progPlan; src = '標準遞增療程';
+                    } else {
+                        if (this.customMed !== 'wegovy') return { status: 'notwegovy', title: '非週纖達療程', msg: '目前「自由編排模式」分頁選擇的用藥不是週纖達，補助計畫僅適用週纖達。' };
+                        plan = this.customPlan; src = '自由編排模式';
+                    }
+                    if (!plan || !plan.pensUsed) return { status: 'none', title: '尚無療程', msg: '尚未產生有效的療程排程。' };
+                    const bought = plan.pensUsed.filter(p => !p.isFree);
+                    if (bought.length < 3) {
+                        return { status: 'insufficient', title: '購買支數不足', src, msg: `目前療程僅需自行購買 ${bought.length} 支筆，未達 3 支，無法符合「買 3 送 N」的補助條件。` };
+                    }
+                    const pen1Week = bought[0].startWeek;
+                    const pen3Week = bought[2].startWeek;
+                    const weeksGap = pen3Week - pen1Week;        // 第1支到第3支的開打週數差
+                    const monthsGap = weeksGap / (52 / 12);      // 約略換算月數 (1月≈4.345週)
+                    const qualifies = weeksGap <= 26;            // 6個月 ≈ 26週 為門檻
+                    let projected = null, projWithin = null;
+                    if (this.timerPen1Date) {
+                        const p1 = new Date(this.timerPen1Date + 'T00:00:00');
+                        if (!isNaN(p1.getTime())) {
+                            projected = new Date(p1.getTime()); projected.setDate(projected.getDate() + weeksGap * 7);
+                            const deadline = this.addMonthsClamped(this.timerPen1Date, 6);
+                            projWithin = deadline ? (projected.getTime() <= deadline.getTime()) : null;
+                        }
+                    }
+                    return {
+                        status: qualifies ? 'ok' : 'risk',
+                        title: qualifies ? '預估可符合補助購買期限' : '預估恐超過補助購買期限',
+                        src, weeksGap, monthsGap, pen3Week, projected, projWithin,
+                        msg: qualifies
+                            ? `依目前療程排程，第 3 支筆預計在開始後約第 ${pen3Week} 週購買（距第 1 支約 ${weeksGap} 週、約 ${monthsGap.toFixed(1)} 個月），在 6 個月（約 26 週）內，預估可符合補助的購買期限規定。`
+                            : `依目前療程排程，第 3 支筆預計要到開始後第 ${pen3Week} 週才會購買（距第 1 支約 ${weeksGap} 週、約 ${monthsGap.toFixed(1)} 個月），已超過 6 個月（約 26 週）。可能無法符合補助的購買期限，建議調整劑量、療程長度或加快遞增速度。`
+                    };
+                },
+
+                getProgressionSchedule(med, target) {
+                    const steps = MED_CONFIG[med].targetDoses;
+                    let schedule = [];
+                    for (let dose of steps) { for (let i = 0; i < 4; i++) schedule.push(dose); if (dose === target) break; }
+                    return schedule;
+                },
+
+                getStandardPen(req, med, allowedPens = MED_CONFIG[med].buyDoses) {
+                    if (med === 'wegovy' && req <= 0.5 && allowedPens.includes(0.5)) return 0.5;
+                    let best = allowedPens[0];
+                    for (let d of allowedPens) { if (d <= req) best = d; }
+                    return best;
+                },
+
+                generatePresetFromSchedule(strategy, med, schedule, maxAllowedWeeks, isFirstConservative = false) {
+                    const pricesConfig = this.prices;
+                    let pens = [], w = 0, currentRemaining = 0, isFirstPen = true, prev_dose = 0;
+                    while (w < schedule.length) {
+                        let req = schedule[w];
+                        let isTapering = false, maxSoFar = 0;
+                        for (let i = 0; i <= w; i++) if (schedule[i] > maxSoFar) maxSoFar = schedule[i];
+                        if (req < maxSoFar) isTapering = true;
+                        while (req > 0.001) {
+                            if (currentRemaining < 0.001) {
+                                let dose, allowedPens = [...MED_CONFIG[med].buyDoses];
+                                if (isFirstPen && isFirstConservative) {
+                                    const minPrice = Math.min(...allowedPens.map(d => pricesConfig[med]?.[d] || Infinity));
+                                    allowedPens = allowedPens.filter(d => (pricesConfig[med]?.[d] || Infinity) === minPrice);
+                                }
+                                if (strategy === 'standard') {
+                                    dose = this.getStandardPen(schedule[w], med, allowedPens);
+                                } else if (strategy === 'max') {
+                                    dose = allowedPens[allowedPens.length - 1];
+                                } else if (strategy === 'balanced') {
+                                    let maxMgInAllowedWeeks = 0;
+                                    for (let i = w; i < Math.min(w + maxAllowedWeeks, schedule.length); i++) maxMgInAllowedWeeks += schedule[i];
+                                    let validPens = allowedPens;
+                                    if (!isTapering) {
+                                        let minReq = Math.max(prev_dose, schedule[w]);
+                                        validPens = allowedPens.filter(d => d >= minReq);
+                                        if (validPens.length === 0) validPens = [allowedPens[allowedPens.length - 1]];
+                                    } else {
+                                        let maxReq = prev_dose;
+                                        validPens = allowedPens.filter(d => d <= maxReq);
+                                        if (validPens.length === 0) validPens = allowedPens;
+                                    }
+                                    dose = validPens[0];
+                                    for (let i = validPens.length - 1; i >= 0; i--) { if (validPens[i] * 4 <= maxMgInAllowedWeeks) { dose = validPens[i]; break; } }
+                                }
+                                pens.push(dose);
+                                currentRemaining = dose * 4;
+                                prev_dose = dose;
+                                isFirstPen = false;
+                            }
+                            let used = Math.min(req, currentRemaining);
+                            currentRemaining -= used; req -= used;
+                        }
+                        w++;
+                    }
+                    return pens;
+                },
+
+                calculatePlanEngine(med, schedule, customPensArr, pricesConfig, selectedSubsidy = 'none', penLimit = 0) {
+                    let pensUsed = [], w = 0, presetIndex = 0, currentPen = null;
+                    let scheduleRemaining = [...schedule];
+                    let boughtInCycle = 0, freeInCycleRemaining = 0, maxBoughtInCycle = 0, totalBought = 0, totalFree = 0;
+                    // 建立一支新筆（共用購買/補助贈送邏輯）。回傳 true=已建立；false=已達購買支數上限、無法再買。
+                    const acquirePen = (wIdx) => {
+                        const wantFree = (med === 'wegovy' && selectedSubsidy !== 'none' && freeInCycleRemaining > 0);
+                        if (!wantFree && penLimit > 0 && totalBought >= penLimit) return false;
+                        let plannedDose;
+                        if (presetIndex < customPensArr.length && MED_CONFIG[med].buyDoses.includes(customPensArr[presetIndex])) { plannedDose = customPensArr[presetIndex]; }
+                        else { plannedDose = this.getStandardPen(scheduleRemaining[wIdx] !== undefined ? scheduleRemaining[wIdx] : schedule[schedule.length - 1], med); }
+                        presetIndex++;
+                        let actualDose = plannedDose, isFree = false, cost = pricesConfig[med]?.[actualDose] || 0, isForcedUpBySubsidy = false;
+                        if (med === 'wegovy' && selectedSubsidy !== 'none') {
+                            if (freeInCycleRemaining > 0) {
+                                isFree = true; totalFree++;
+                                if (plannedDose < maxBoughtInCycle) { actualDose = maxBoughtInCycle; isForcedUpBySubsidy = true; }
+                                const validDoses = MED_CONFIG[med].buyDoses;
+                                if (!validDoses.includes(actualDose)) { actualDose = validDoses.find(d => d >= actualDose) || validDoses[validDoses.length - 1]; }
+                                cost = 0; freeInCycleRemaining--;
+                                if (freeInCycleRemaining === 0) { maxBoughtInCycle = 0; }
+                            } else {
+                                isFree = false; totalBought++; boughtInCycle++;
+                                maxBoughtInCycle = Math.max(maxBoughtInCycle, actualDose);
+                                if (selectedSubsidy === 'wegovy_A_first' && boughtInCycle === 3) { freeInCycleRemaining = 1; boughtInCycle = 0; }
+                                else if (selectedSubsidy === 'wegovy_A_renew' && boughtInCycle === 3) { freeInCycleRemaining = 2; boughtInCycle = 0; }
+                                else if (selectedSubsidy === 'wegovy_B' && boughtInCycle === 6) { freeInCycleRemaining = 3; boughtInCycle = 0; }
+                            }
+                        } else { totalBought++; }
+                        currentPen = { id: wIdx+'_'+presetIndex+'_'+Math.random(), index: pensUsed.length+1, dose: actualDose, originalDose: plannedDose, isFree, isForcedUpBySubsidy, maxBoughtSoFar: maxBoughtInCycle, totalMg: actualDose*4, remaining: actualDose*4, startWeek: wIdx+1, endWeek: wIdx+1, originalCost: pricesConfig[med]?.[actualDose]||0, cost, weeklyUsage: [] };
+                        pensUsed.push(currentPen);
+                        return true;
+                    };
+
+                    let extensionWeeks = 0;
+
+                    if (penLimit > 0) {
+                        // ===== 指定購買支數模式：照療程劑量順序買滿 N 支、逐週用到完，超過即停 =====
+                        let guard = 0, stop = false;
+                        const baseDose = schedule.length ? schedule[schedule.length - 1] : 0;
+                        while (!stop && guard < 800) {
+                            guard++;
+                            const inSched = w < schedule.length;
+                            let target = inSched ? scheduleRemaining[w] : baseDose;
+                            if (target <= 0.001) { if (!inSched) break; w++; continue; }
+                            let req = target;
+                            while (req > 0.001) {
+                                if (!currentPen || currentPen.remaining < 0.001) {
+                                    if (!acquirePen(w)) { stop = true; break; }
+                                }
+                                let used = Math.min(req, currentPen.remaining);
+                                currentPen.remaining -= used; req -= used; currentPen.endWeek = w+1;
+                                let maxClicks = MED_CONFIG[med].getMaxClicks(currentPen.dose);
+                                let clicks = Math.round(used * (maxClicks / currentPen.dose));
+                                currentPen.weeklyUsage.push({ week: w+1, doseUsed: used, targetForWeek: target, clicks, maxClicks, isPartial: Math.abs(used - target) > 0.001 && currentPen.remaining < 0.001 && req > 0.001, isExtension: !inSched });
+                            }
+                            if (!inSched && !stop) extensionWeeks++;
+                            if (stop) break;
+                            w++;
+                            if (totalBought >= penLimit && freeInCycleRemaining === 0 && currentPen && currentPen.remaining < 0.001) break;
+                        }
+                    } else {
+                        while (w < scheduleRemaining.length) {
+                            let req = scheduleRemaining[w];
+                            while (req > 0.001) {
+                                if (!currentPen || currentPen.remaining < 0.001) { acquirePen(w); }
+                                let used = Math.min(req, currentPen.remaining);
+                                currentPen.remaining -= used; req -= used; currentPen.endWeek = w+1;
+                                let maxClicks = MED_CONFIG[med].getMaxClicks(currentPen.dose);
+                                let clicksPerMg = maxClicks / currentPen.dose;
+                                let clicks = Math.round(used * clicksPerMg);
+                                let isPartial = Math.abs(used - scheduleRemaining[w]) > 0.001;
+                                currentPen.weeklyUsage.push({ week: w+1, doseUsed: used, targetForWeek: scheduleRemaining[w], clicks, maxClicks, isPartial });
+                            }
+                            w++;
+                        }
+                        // ===== 整支用完模式：剩餘藥量以結尾(目前使用中)劑量延打到用完 =====
+                        if (this.penToEmpty && currentPen && currentPen.remaining > 0.001 && schedule.length > 0) {
+                            const extDose = schedule[schedule.length - 1];
+                            if (extDose > 0.001) {
+                                let extW = schedule.length;
+                                const maxClicks = MED_CONFIG[med].getMaxClicks(currentPen.dose);
+                                const clicksPerMg = maxClicks / currentPen.dose;
+                                while (currentPen.remaining > 0.001 && extensionWeeks < 60) {
+                                    const used = Math.min(extDose, currentPen.remaining);
+                                    extW++;
+                                    currentPen.remaining -= used;
+                                    currentPen.endWeek = extW;
+                                    currentPen.weeklyUsage.push({ week: extW, doseUsed: used, targetForWeek: extDose, clicks: Math.round(used * clicksPerMg), maxClicks, isPartial: false, isExtension: true });
+                                    extensionWeeks++;
+                                }
+                            }
+                        }
+                    }
+
+                    // 最後一支零頭：最後一支筆的最後一週若打不滿完整劑量，記錄其剩餘/不足量
+                    let lastZeroHead = null;
+                    if (pensUsed.length > 0) {
+                        const lp = pensUsed[pensUsed.length - 1];
+                        const lu = lp.weeklyUsage[lp.weeklyUsage.length - 1];
+                        if (lu && lu.doseUsed < lu.targetForWeek - 0.001 && lp.remaining < 0.001) {
+                            lu.isShortfall = true; lu.isPartial = false;
+                            lastZeroHead = { dispensedMg: lu.doseUsed, targetMg: lu.targetForWeek, shortfallMg: lu.targetForWeek - lu.doseUsed, week: lu.week };
+                        }
+                    }
+                    let maxWeek = 0;
+                    pensUsed.forEach(p => p.weeklyUsage.forEach(u => { if (u.week > maxWeek) maxWeek = u.week; }));
+                    const totalWeeks = penLimit > 0 ? maxWeek : (schedule.length + extensionWeeks);
+                    let totalCost = 0, totalMgBought = 0, totalShots = 0;
+                    pensUsed.forEach(pen => { totalCost += pen.cost; totalMgBought += pen.totalMg; totalShots += pen.weeklyUsage.length; });
+                    const avgMonthlyCost = totalWeeks > 0 ? (totalCost / totalWeeks) * 4 : 0;
+                    const freeNeedles = med === 'wegovy' ? pensUsed.length * 4 : 0;
+                    const extraNeedles = Math.max(0, totalShots - freeNeedles);
+                    let carryOverMg = 0, carryOverValue = 0, netCost = totalCost, netAvgMonthlyCost = avgMonthlyCost;
+                    if (pensUsed.length > 0) {
+                        const lastPen = pensUsed[pensUsed.length - 1];
+                        if (lastPen.remaining > 0.01) { carryOverMg = lastPen.remaining; carryOverValue = (lastPen.remaining / lastPen.totalMg) * lastPen.cost; netCost = totalCost - carryOverValue; netAvgMonthlyCost = totalWeeks > 0 ? (netCost / totalWeeks) * 4 : 0; }
+                    }
+                    let subsidyAvgMonthly = null, subsidyTotalCost = null;
+                    if (med === 'wegovy' && selectedSubsidy === 'none' && totalCost > 0) {
+                        subsidyAvgMonthly = { buy6get3: avgMonthlyCost*(6/9), buy3get1: avgMonthlyCost*(3/4), buy3get2: avgMonthlyCost*(3/5) };
+                        subsidyTotalCost = { buy6get3: totalCost*(6/9), buy3get1: totalCost*(3/4), buy3get2: totalCost*(3/5) };
+                    }
+                    let boughtGroups = {}, freeGroups = {};
+                    pensUsed.forEach(pen => {
+                        if (pen.isFree) { freeGroups[pen.dose] = (freeGroups[pen.dose]||0)+1; }
+                        else { boughtGroups[pen.dose] = (boughtGroups[pen.dose]||0)+1; }
+                    });
+                    const formatGroup = (groups) => Object.keys(groups).sort((a,b)=>parseFloat(a)-parseFloat(b)).map(dose=>`${dose} mg x ${groups[dose]} 支`).join(', ')||'無';
+                    return { schedule, pensUsed, totalWeeks, extensionWeeks, lastZeroHead, penLimit, totalCost, avgMonthlyCost, totalMgBought, carryOverMg, carryOverValue, netCost, netAvgMonthlyCost, subsidyAvgMonthly, subsidyTotalCost, selectedSubsidy, totalBought, totalFree, totalShots, extraNeedles, boughtSummaryStr: formatGroup(boughtGroups), freeSummaryStr: formatGroup(freeGroups) };
+                },
+
+                formatClicks(clicks, maxC) {
+                    if (clicks <= maxC) return `轉 ${clicks} 格`;
+                    const full = Math.floor(clicks / maxC), rem = clicks % maxC;
+                    if (rem === 0) return `轉 ${clicks} 格 (${maxC}格x${full}次)`;
+                    return `轉 ${clicks} 格 (${maxC}格x${full}次 + ${rem}格)`;
+                },
+
+                renderPlanSummary(plan, med, mode) {
+                    const round = (n) => Math.round(n).toLocaleString();
+                    const isSubsidyApplied = plan.selectedSubsidy !== 'none';
+                    let limitBanner = '';
+                    if (plan.penLimit > 0) {
+                        const zh = plan.lastZeroHead;
+                        limitBanner = `<div class="mb-4 bg-purple-900 bg-opacity-40 border border-purple-600 border-opacity-50 rounded-xl p-3 relative z-10"><div class="flex items-center gap-2 text-purple-200 font-bold text-sm mb-1"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg>指定購買支數模式：共 ${plan.penLimit} 支</div>${zh ? `<div class="text-xs text-purple-100 leading-relaxed font-medium mt-1.5 space-y-1"><div>最後一支筆在第 ${zh.week} 週剩下 <strong class="text-white">${zh.dispensedMg.toFixed(2)} mg</strong>，不足一次完整劑量（目標 ${zh.targetMg} mg，缺 ${zh.shortfallMg.toFixed(2)} mg）。處理方式擇一：</div><div class="pl-2">① <strong>延打用完</strong>：第 ${zh.week} 週就施打這 ${zh.dispensedMg.toFixed(2)} mg（已列入上方排程與施打次數）。</div><div class="pl-2">② <strong>丟棄／留用</strong>：不施打此零頭，視為剩餘 ${zh.dispensedMg.toFixed(2)} mg，可丟棄或留待下次銜接。</div></div>` : `<div class="text-xs text-purple-200 font-medium mt-1">最後一支筆剛好整支用完，無零頭剩餘。</div>`}</div>`;
+                    }
+                    let subsidySegment = isSubsidyApplied
+                        ? `<div class="mt-2 space-y-2 bg-blue-900 bg-opacity-40 border border-blue-700 border-opacity-50 rounded-xl p-3"><div class="text-xs text-blue-200 font-bold mb-1">分規數量與規格統計：</div><div class="flex justify-between items-center text-sm"><span class="text-blue-300">🛒 自費購買 (${plan.totalBought} 支)：</span><span class="font-extrabold text-white text-right">${plan.boughtSummaryStr}</span></div><div class="flex justify-between items-center text-sm border-t border-blue-700 border-opacity-30 pt-2"><span class="text-green-300">🎁 原廠贈送 (${plan.totalFree} 支)：</span><span class="font-extrabold text-white text-right">${plan.freeSummaryStr}</span></div></div>`
+                        : `<div class="mt-2 bg-gray-800 bg-opacity-50 border border-gray-700 border-opacity-50 rounded-xl p-3 flex justify-between items-center"><div class="text-sm text-gray-400 font-medium">購筆規格統計 (${plan.pensUsed.length} 支)：</div><div class="text-sm font-bold text-white text-right">${plan.boughtSummaryStr}</div></div>`;
+                    let carryOverSegment = '';
+                    if (plan.carryOverMg > 0.01) {
+                        carryOverSegment = `<div class="mt-3 bg-green-900 bg-opacity-40 border border-green-800 border-opacity-50 p-4 rounded-xl space-y-3"><div class="flex items-start gap-2"><span class="text-green-400 shrink-0" style="margin-top:2px;"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></span><div><div class="text-sm text-green-100 font-semibold">銜接維持期剩餘藥量：<strong class="text-white">${plan.carryOverMg.toFixed(1)} mg</strong></div><div class="text-xs text-green-300 mt-1 leading-relaxed font-medium" style="font-size:11px;">療程結束時，最後一支筆沒打完的藥可直接保留至下個月「維持期」繼續打。</div></div></div><div class="pt-3 border-t border-green-800 border-opacity-30"><div class="text-xs text-green-200 mb-2 font-semibold">扣除上述剩餘藥劑價值後，本階段「實際消耗」之花費：</div><div class="grid grid-cols-2 gap-3"><div class="bg-green-900 bg-opacity-50 rounded-lg p-2"><div class="text-xs text-green-400 font-bold" style="font-size:10px;">實際消耗總價</div><div class="text-lg font-bold text-green-100">$${round(plan.netCost)}</div></div><div class="bg-green-900 bg-opacity-50 rounded-lg p-2"><div class="text-xs text-green-400 font-bold" style="font-size:10px;">實際消耗平均每月</div><div class="text-lg font-bold text-green-400">$${round(plan.netAvgMonthlyCost)}</div></div></div></div></div>`;
+                    }
+                    const needleAlert = plan.extraNeedles > 0
+                        ? `<span class="text-yellow-400 flex items-center gap-1 font-bold text-sm"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg> 須另購 ${plan.extraNeedles} 個</span>`
+                        : `<span class="text-green-400 flex items-center gap-1 font-bold text-sm"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg> 內附足夠，不須另購</span>`;
+                    let subsidyEstimation = '';
+                    if (med === 'wegovy' && !isSubsidyApplied && plan.subsidyAvgMonthly) {
+                        subsidyEstimation = `<div class="mt-6 pt-5 border-t border-gray-700 relative z-10"><div class="flex items-center gap-2 mb-3 text-blue-300 font-bold"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg><span class="text-sm">套用補助估算參考 <span class="text-white">(療程總花費)</span></span></div><div class="space-y-2 text-sm font-medium"><div class="flex justify-between items-center bg-white bg-opacity-5 p-2 rounded"><div><div class="text-gray-300">方案 A 初購：買 3 送 1</div><div class="text-gray-500 mt-0.5" style="font-size:10px;">平均每月約 $${round(plan.subsidyAvgMonthly.buy3get1)}</div></div><div class="font-bold text-blue-400">$${round(plan.subsidyTotalCost.buy3get1)}</div></div><div class="flex justify-between items-center bg-white bg-opacity-5 p-2 rounded"><div><div class="text-gray-300">方案 A 續購：買 3 送 2</div><div class="text-gray-500 mt-0.5" style="font-size:10px;">平均每月約 $${round(plan.subsidyAvgMonthly.buy3get2)}</div></div><div class="font-bold text-blue-400">$${round(plan.subsidyTotalCost.buy3get2)}</div></div><div class="flex justify-between items-center bg-white bg-opacity-5 p-2 rounded"><div><div class="text-gray-300">方案 B：買 6 送 3</div><div class="text-gray-500 mt-0.5" style="font-size:10px;">平均每月約 $${round(plan.subsidyAvgMonthly.buy6get3)}</div></div><div class="font-bold text-blue-400">$${round(plan.subsidyTotalCost.buy6get3)}</div></div></div></div>`;
+                    }
+                    return `<div class="bg-gray-900 text-white p-6 rounded-2xl shadow-lg relative overflow-hidden">${isSubsidyApplied?'<div class="absolute top-0 right-0 p-32 bg-blue-500 bg-opacity-10 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>':''}<div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-3 relative z-10"><h3 class="text-lg font-bold">計畫總覽</h3><span class="text-gray-400 text-sm bg-gray-800 px-2 py-1 rounded">總需時 ${plan.totalWeeks} 週${plan.extensionWeeks>0?`<span class="text-teal-400" style="font-size:10px;"> (含延打 ${plan.extensionWeeks} 週)</span>`:''}</span></div>${limitBanner}<div class="space-y-4 relative z-10 font-medium"><div class="flex justify-between items-end"><div class="text-gray-400 text-sm">總共需取得</div><div class="text-xl font-bold">${plan.pensUsed.length} <span class="text-base font-normal">支筆針</span></div></div>${subsidySegment}<div class="flex justify-between items-end mt-4 border-t border-gray-700 border-opacity-50 pt-4"><div class="text-gray-400 text-sm">預估需準備針頭總數<br/><span class="text-gray-500" style="font-size:10px;">(${med==='wegovy'?'週纖達每筆內附4個針頭':'猛健樂未附針頭'})</span></div><div class="text-right"><div class="text-gray-400 text-xs mb-0.5">總施打次數 ${plan.totalShots} 次</div><div class="text-base font-bold flex items-center justify-end gap-1.5">${needleAlert}</div></div></div><div class="flex justify-between items-end mt-4 border-t border-gray-700 border-opacity-50 pt-4"><div class="text-gray-400 text-sm">${isSubsidyApplied?'<span class="text-blue-300 font-bold">總支付花費 (已扣除贈送)</span>':'原價無補助 總花費'}<br/><span class="text-xs text-gray-500">(實際支付給診所的金額)</span></div><div class="text-2xl font-bold text-white">$${plan.totalCost.toLocaleString()}</div></div><div class="pt-3 border-t border-white border-opacity-10 flex justify-between items-end"><div class="text-gray-400 text-sm font-semibold">平均每月 (每4週) 支付</div><div class="text-xl font-extrabold text-indigo-400">$${Math.round(plan.avgMonthlyCost).toLocaleString()}</div></div>${carryOverSegment}</div><button @click="handleExportText()" class="w-full mt-6 py-3 bg-indigo-500 hover:bg-indigo-600 text-white font-bold rounded-xl flex justify-center items-center gap-2 transition-colors shadow-lg relative z-10"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>列印 / 匯出衛教單給病患</button>${subsidyEstimation}</div>`;
+                },
+
+                renderPlanDetailList(plan, med, mode) {
+                    const currentMaxWeeks = mode === 'custom' ? this.customMaxWeeks : this.progMaxWeeks;
+                    const activeStrategy = mode === 'custom' ? this.customStrategy : this.progStrategy;
+                    const buyDoses = MED_CONFIG[med].buyDoses;
+                    let timelineItems = '';
+                    plan.pensUsed.forEach((pen, idx) => {
+                        const weeksLasted = pen.endWeek - pen.startWeek + 1;
+                        const isLong = weeksLasted > currentMaxWeeks, isVeryLong = weeksLasted > currentMaxWeeks + 2;
+                        let optionsMarkup = buyDoses.map(d => `<option value="${d}" ${pen.dose===d?'selected':''}>${d} mg 筆針</option>`).join('');
+                        let subsidyNote = pen.isForcedUpBySubsidy ? `<div class="mb-2 text-blue-700 bg-blue-100 px-2 py-1 rounded flex gap-1 items-start font-medium" style="font-size:10px;"><svg width="14" height="14" class="shrink-0" style="margin-top:2px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg> 依原廠規定，贈送劑量不得低於購買最大劑量 (${pen.maxBoughtSoFar}mg)，系統已自動升級。</div>` : '';
+                        let weeklyUsageMarkup = pen.weeklyUsage.map(wu => {
+                            let pb = wu.isPartial ? `<span class="bg-orange-100 text-orange-600 px-1 rounded flex items-center font-bold" style="font-size:10px;"><svg width="12" height="12" style="margin-right:2px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>拆打</span>` : '';
+                            let ext = wu.isExtension ? `<span class="bg-teal-100 text-teal-700 px-1 rounded flex items-center font-bold" style="font-size:10px;">延打用完</span>` : '';
+                            let sf = wu.isShortfall ? `<span class="bg-purple-100 text-purple-700 px-1 rounded flex items-center font-bold" style="font-size:10px;">劑量不足</span>` : '';
+                            return `<div class="flex flex-col gap-1 border-b border-gray-100 last:border-0 pb-1.5 last:pb-0 font-medium"><div class="flex justify-between items-center"><span class="text-xs font-semibold text-gray-700">第 ${wu.week} 週</span><div class="flex items-center gap-1">${sf}${ext}${pb}<span class="text-sm font-bold ${pen.isFree?'text-blue-700':'text-indigo-700'}">${wu.doseUsed.toFixed(2)} <span class="text-xs font-normal opacity-70">mg</span></span></div></div><div class="text-right font-bold rounded px-1.5 py-0.5 w-fit ml-auto ${pen.isFree?'bg-blue-100 text-blue-700':'bg-gray-50 text-gray-500'}" style="font-size:11px;">${this.formatClicks(wu.clicks, wu.maxClicks)}</div></div>`;
+                        }).join('');
+                        let warningMarkup = isVeryLong
+                            ? `<div class="mt-3 text-xs bg-red-50 text-red-600 p-2 rounded flex gap-2 font-semibold"><svg width="16" height="16" class="shrink-0" style="margin-top:2px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>警告：使用超過 ${currentMaxWeeks+2} 週，極易產生衛生疑慮。</div>`
+                            : isLong ? `<div class="mt-3 text-xs bg-yellow-50 text-yellow-600 p-2 rounded flex gap-2 font-semibold"><svg width="16" height="16" class="shrink-0" style="margin-top:2px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>留意：開封時間超過您設定的 ${currentMaxWeeks} 週。</div>` : '';
+                        let lastPenCarryMarkup = (idx === plan.pensUsed.length - 1 && pen.remaining > 0.01)
+                            ? `<div class="mt-3 text-xs border p-2 rounded flex justify-between items-center font-bold ${pen.isFree?'bg-blue-50 text-blue-700 border-blue-100':'bg-green-50 text-green-700 border-green-100'}"><span>療程結束剩餘 (留作維持期用):</span><span class="font-extrabold text-base">${pen.remaining.toFixed(2)} mg</span></div>` : '';
+                        timelineItems += `<div class="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group"><div class="flex items-center justify-center w-10 h-10 rounded-full border-4 font-extrabold text-sm z-10 shrink-0 md:order-1 md:group-odd:-ml-5 md:group-even:-mr-5 shadow-sm ${pen.isFree?'bg-blue-100 border-blue-200 text-blue-600':'bg-white border-indigo-100 text-indigo-600'}">${pen.isFree?`<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><rect width="18" height="14" x="3" y="8" rx="2"/><path d="M12 5a3 3 0 1 0-3 3h3Z"/><path d="M12 5a3 3 0 1 1 3 3h-3Z"/><path d="M12 8v14"/><line x1="3" x2="21" y1="12" y2="12"/></svg>`:pen.index}</div><div class="timeline-card p-4 rounded-xl border shadow-sm hover:shadow-md bg-gray-50 border-gray-200"><div class="flex justify-between items-start mb-2 font-bold"><span class="text-xs uppercase tracking-wider ${pen.isFree?'text-blue-600':'text-gray-500'} font-bold">${pen.isFree?'🎁 原廠無償贈送':`自行購買 (第 ${pen.index} 支)`}</span><span class="text-sm font-extrabold">${pen.isFree?`<span><span class="line-through text-gray-400 mr-2 font-normal text-xs">$${pen.originalCost.toLocaleString()}</span><span class="text-blue-600">$0</span></span>`:`<span class="text-gray-700">$${pen.cost.toLocaleString()}</span>`}</span></div><div class="mb-3 relative"><select @change="${mode==='custom'?'updateCustomPenDose':'updateProgPenDose'}(${idx}, $event.target.value)" class="w-full border text-base font-bold rounded-lg p-2 pr-8 focus:outline-none focus:ring-2 appearance-none cursor-pointer ${pen.isFree?'bg-white bg-opacity-80 border-blue-200 text-blue-900 focus:ring-blue-500':'bg-white border-gray-300 text-gray-800 focus:ring-indigo-500'}">${optionsMarkup}</select><span class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span></div>${subsidyNote}<div class="flex justify-between text-sm mb-1.5"><span class="text-gray-500">涵蓋週數</span><span class="font-bold text-gray-800">第 ${pen.startWeek} ~ ${pen.endWeek} 週</span></div><div class="flex justify-between text-sm mt-1.5"><span class="text-gray-500">耗用時間</span><span class="font-extrabold ${isVeryLong?'text-red-500':isLong?'text-yellow-600':'text-green-600'}">${weeksLasted} 週</span></div><div class="mt-3 border rounded-lg p-3 bg-white border-gray-200"><div class="text-xs font-bold text-gray-500 mb-2 flex items-center gap-1 border-b border-gray-100 pb-1.5"><svg width="14" height="14" class="text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="m18 2 4 4"/><path d="m17 7 3-3"/><path d="M19 9 8.7 19.3c-.2.2-.5.3-.7.3H5v-3c0-.3.1-.5.3-.7L15.6 5"/><path d="m9 11 4 4"/><path d="m5 19-3 3"/><path d="m14 4 6 6"/></svg>每週施打明細</div><div class="space-y-2 overflow-y-auto pr-1" style="max-height:12rem;">${weeklyUsageMarkup}</div></div>${warningMarkup}${lastPenCarryMarkup}</div></div>`;
+                    });
+                    return `<div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100"><div class="flex justify-between items-center mb-6"><h2 class="text-lg font-bold flex items-center gap-2 text-gray-800"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><line x1="10" x2="21" y1="6" y2="6"/><line x1="10" x2="21" y1="12" y2="12"/><line x1="10" x2="21" y1="18" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg>購筆計畫明細</h2>${activeStrategy==='custom'?'<span class="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded-md font-bold">您已手動修改計畫</span>':''}</div><div class="space-y-4 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gray-100">${timelineItems}</div></div>`;
+                },
+
+                updateProgPenDose(index, value) { this.progStrategy='custom'; let newPens=[...this.progPens]; newPens[index]=parseFloat(value); this.progPens=newPens.slice(0,index+1); },
+                updateCustomPenDose(index, value) { this.customStrategy='custom'; let newPens=[...this.customPens]; newPens[index]=parseFloat(value); this.customPens=newPens.slice(0,index+1); },
+
+                handleExportText() {
+                    let content = `=========================================\n        個人專屬減重筆針療程規劃書\n=========================================\n產出日期：${new Date().toLocaleDateString()}\n\n`;
+                    if (this.activeTab === 'progression' || this.activeTab === 'custom') {
+                        const plan = this.activeTab === 'custom' ? this.customPlan : this.progPlan;
+                        const med = this.activeTab === 'custom' ? this.customMed : this.progMed;
+                        const currentMaxWeeks = this.activeTab === 'custom' ? this.customMaxWeeks : this.progMaxWeeks;
+                        const appliedSubsidy = plan.selectedSubsidy;
+                        content += `【療程基本資訊】\n用藥選擇：${MED_CONFIG[med].name}\n`;
+                        if (appliedSubsidy !== 'none') {
+                            const sn = { 'wegovy_A_first':'方案 A 初購 (買3送1)', 'wegovy_A_renew':'方案 A 續購 (買3送2)', 'wegovy_B':'方案 B (買6送3 合併申請)' };
+                            content += `套用原廠補助：是 [${sn[appliedSubsidy]}]\n`;
+                        }
+                        content += `初次保守使用：${this.isFirstConservative?'是 (第1支購買最低價格位入門筆)':'否'}\n`;
+                        if (this.activeTab === 'custom') {
+                            content += `設定起始劑量：${this.customStart} mg\n設定維持劑量：${this.customPeak} mg\n\n[各階段排程設定]\n`;
+                            this.customBlocks.forEach(b => { if (b.weeks > 0) content += `- ${b.phase}: ${b.dose} mg 共 ${b.weeks} 週\n`; });
+                            content += `\n`;
+                        } else { content += `最終目標劑量：每週 ${this.progTarget} mg\n\n`; }
+                        content += `【總結預估】\n預計療程長度：${plan.totalWeeks} 週${plan.extensionWeeks>0?` (含最後一支筆剩餘藥量延打 ${plan.extensionWeeks} 週用完)`:''}\n`;
+                        if (plan.penLimit > 0) {
+                            content += `購買模式：指定購買 ${plan.penLimit} 支 (用到完，超過即停)\n`;
+                            if (plan.lastZeroHead) {
+                                const zh = plan.lastZeroHead;
+                                content += `最後一支零頭：第 ${zh.week} 週剩 ${zh.dispensedMg.toFixed(2)} mg，不足完整劑量 (目標 ${zh.targetMg} mg，缺 ${zh.shortfallMg.toFixed(2)} mg)\n  ① 延打用完：第 ${zh.week} 週施打此 ${zh.dispensedMg.toFixed(2)} mg (已列入排程)\n  ② 丟棄/留用：不打此零頭，視為剩餘 ${zh.dispensedMg.toFixed(2)} mg 可丟棄或留待下次銜接\n`;
+                            } else {
+                                content += `最後一支筆剛好整支用完，無零頭剩餘。\n`;
+                            }
+                        }
+                        if (appliedSubsidy !== 'none') {
+                            content += `總共需取得筆針：${plan.pensUsed.length} 支\n ├─ 🛒 自費購買 (${plan.totalBought} 支)：${plan.boughtSummaryStr}\n └─ 🎁 原廠無償贈送 (${plan.totalFree} 支)：${plan.freeSummaryStr}\n`;
+                            content += `預估總施打次數：${plan.totalShots} 次\n預估需加購針頭：${plan.extraNeedles} 個\n【套用補助後】預估總支付花費：$${plan.totalCost.toLocaleString()}\n【套用補助後】平均每月支付花費：$${Math.round(plan.avgMonthlyCost).toLocaleString()}\n\n`;
+                        } else {
+                            content += `總共需購買筆針：${plan.pensUsed.length} 支\n └─ 🛒 自費購買規格明細：${plan.boughtSummaryStr}\n`;
+                            content += `預估總施打次數：${plan.totalShots} 次\n預估需加購針頭：${plan.extraNeedles} 個\n【原價無補助】預估總支付花費：$${plan.totalCost.toLocaleString()}\n【原價無補助】平均每月支付花費：$${Math.round(plan.avgMonthlyCost).toLocaleString()}\n\n`;
+                        }
+                        if (plan.carryOverMg > 0.01) {
+                            content += `【✨後續維持期可用剩餘藥量】\n本階段療程結束時，最後一支筆預計剩餘 ${plan.carryOverMg.toFixed(1)} mg 的藥。\n此剩餘藥品可無縫銜接至下個月「維持期」繼續施打。\n▶ 扣除此部分留用藥品價值後，本階段「實際消耗」之總花費約：$${Math.round(plan.netCost).toLocaleString()}\n▶ 本階段「實際消耗」之每月平均花費約：$${Math.round(plan.netAvgMonthlyCost).toLocaleString()}\n\n`;
+                        }
+                        content += `-----------------------------------------\n【購藥與施打明細】\n\n`;
+                        plan.pensUsed.forEach(pen => {
+                            if (pen.isFree) { content += `[第 ${pen.index} 支筆] - 🎁 原廠無償贈送 ${pen.dose} mg 筆針 (原價 $${pen.originalCost.toLocaleString()} -> 實際支付 $0)\n`; if (pen.isForcedUpBySubsidy) content += `* (依原廠規定，贈送劑量不得低於購買最大劑量 ${pen.maxBoughtSoFar}mg，已自動為您升級劑量)\n`; }
+                            else { content += `[第 ${pen.index} 支筆] - 自費購買 ${pen.dose} mg 筆針 (售價 $${pen.cost.toLocaleString()})\n`; }
+                            content += `涵蓋時間：第 ${pen.startWeek} ~ 第 ${pen.endWeek} 週\n每週施打方法：\n`;
+                            pen.weeklyUsage.forEach(wu => { let pn=wu.isPartial?' (⚠️本週需跨兩支筆拆打)':''; let xn=wu.isExtension?' (♻️剩餘藥量延打用完)':''; content+=` - 第 ${wu.week} 週：打 ${wu.doseUsed.toFixed(2)} mg -> 【${this.formatClicks(wu.clicks,wu.maxClicks)}】${pn}${xn}\n`; });
+                            if (pen.endWeek-pen.startWeek+1 > currentMaxWeeks) { content+=`* 提醒：此支筆針開封將超過您設定的 ${currentMaxWeeks} 週效期，請留意衛生安全。\n`; }
+                            content += `\n`;
+                        });
+                    } else {
+                        const sc = this.singleCalc;
+                        content += `【單筆施打資訊】\n用藥選擇：${MED_CONFIG[this.singleMed].name}\n購買筆針劑量：${sc.safeBuyDose} mg 筆針 (單支)\n每週目標劑量：${sc.safeTargetDose} mg / 週\n\n每週需施打：${this.formatClicks(sc.requiredClicks,sc.maxClicks)}\n此支筆預計可用：${sc.weeksPerPen.toFixed(1)} 週\n預估需加購針頭：${sc.extraNeedles} 個\n\n【原價無補助花費】\n平均每週花費：$${Math.round(sc.costPerWeek).toLocaleString()}\n平均每月(4週)花費：$${Math.round(sc.costPerMonth).toLocaleString()}\n\n`;
+                        if (this.singleMed==='wegovy'&&sc.subsidy) { content+=`【套用週纖達補助計畫 - 估算花費】\n★ 方案 A 初購 (買 3 送 1)：\n   每週約 $${Math.round(sc.subsidyWeekly.buy3get1).toLocaleString()}\n   每月約 $${Math.round(sc.subsidy.buy3get1).toLocaleString()}\n\n★ 方案 A 續購 (買 3 送 2)：\n   每週約 $${Math.round(sc.subsidyWeekly.buy3get2).toLocaleString()}\n   每月約 $${Math.round(sc.subsidy.buy3get2).toLocaleString()}\n\n★ 方案 B (買 6 送 3 合併申請)：\n   每週約 $${Math.round(sc.subsidyWeekly.buy6get3).toLocaleString()}\n   每月約 $${Math.round(sc.subsidy.buy6get3).toLocaleString()}\n\n`; }
+                        const mp = this.multiPenCalc;
+                        if (mp) {
+                            content += `【整批購買試算】\n預計購買支數：${mp.n} 支 (${sc.safeBuyDose} mg 筆針)\n所需總價格：$${mp.totalCost.toLocaleString()}\n可施打週數 (整批用到完)：${mp.weeks} 週 (約 ${(mp.weeks/4.345).toFixed(1)} 個月)${mp.finalPartialMg>0.001?`\n* 最後一週剩餘藥量僅 ${mp.finalPartialMg.toFixed(2)} mg，不足完整一次目標劑量`:''}\n預估總施打次數：${mp.shots} 次${mp.crossWeeks>0?` (含 ${mp.crossWeeks} 週需跨筆拆打)`:''}\n需加購針頭：${mp.extraNeedles} 個${this.singleMed==='wegovy'?` (原廠附 ${mp.freeNeedles} 個)`:' (猛健樂不附針頭)'}\n平均每月 (每4週) 花費：$${Math.round(mp.avgMonthly).toLocaleString()}\n\n`;
+                        }
+                    }
+                    if ((this.activeTab!=='single'&&(this.activeTab==='custom'?this.customMed:this.progMed)==='wegovy')||(this.activeTab==='single'&&this.singleMed==='wegovy')) {
+                        content+=`\n-----------------------------------------\n【🎁 週纖達無償藥品補助 必知規定】\n1. 憑證保管：請務必妥善保管「自費明細(收據)」及「藥袋」。\n2. 方案A：須於半年內購買完成3支。方案B：半年內須買齊前3支，剩餘3支須於前3支買齊後的60天內購買完成。\n3. 申請期限：於「買到第3支筆後」的 60 天內，透過 LINE 官方帳號提出申請。\n4. 贈藥劑量：贈送的筆針劑量，必須「大於或等於」您購買紀錄中的最大劑量。\n5. 領藥期限：審核通過後，請於 90 天內至原申請診所或指定藥局領取。\n`;
+                    }
+                    content+=`\n=========================================\n⚠️ 醫療與費用重要提醒：\n1. 【藥品效期】猛健樂以及週纖達的原廠標示都是使用 4 週。\n2. 【預估金額】本報告顯示之金額純屬「藥品預估費用」。\n3. 【看診費用】實際結帳時，尚需包含醫師看診費、掛號費或其他醫療相關費用。\n4. 【最終花費】所有實際花費與最終結帳金額，請以醫療院所之實際收費標準為準。\n\n* 醫學衛教資訊，本表僅供預估與排程參考。\n* 實際用藥劑量與頻率，請務必遵從醫師指示。\n`;
+                    const bom='\uFEFF';
+                    const blob=new Blob([bom+content],{type:'text/plain;charset=utf-8'});
+                    const url=URL.createObjectURL(blob);
+                    const a=document.createElement('a');
+                    a.href=url; a.download=`減重筆針療程規劃書_${new Date().toISOString().split('T')[0]}.txt`;
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                }
+            };
+        }
+    </script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        [x-cloak] { display: none !important; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        input[type="range"], input[type="checkbox"] { accent-color: #10B981 !important; }
+        .timeline-card { width: calc(100% - 3rem) !important; }
+        @media (min-width: 768px) { .timeline-card { width: calc(50% - 2rem) !important; } }
+    </style>
+</head>
+<body class="min-h-screen bg-gray-50 text-gray-800 font-sans antialiased">
+<div x-data="app()" x-init="init()" class="p-4 md:p-8 max-w-6xl mx-auto space-y-6" x-cloak>
+
+    <header class="flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-gray-100 gap-4 font-bold">
+        <div class="flex items-center gap-3">
+            <div class="p-3 bg-indigo-100 text-indigo-600 rounded-xl">
+                <svg width="32" height="32" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="16" x2="16" y1="14" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/></svg>
+            </div>
+            <div>
+                <h1 class="text-2xl font-bold text-gray-900">減重筆針精算與療程規劃</h1>
+                <p class="text-gray-500 text-sm mt-1 font-normal">支援 猛健樂 (Mounjaro) / 週纖達 (Wegovy)</p>
+            </div>
+        </div>
+        <div class="flex flex-col sm:flex-row items-stretch gap-2 w-full md:w-auto">
+            <button @click="showSubsidyTimer = true" class="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-colors" style="padding-top:10px;padding-bottom:10px;">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                <span>週纖達補助時程試算</span>
+            </button>
+            <button @click="showSettings = !showSettings" class="flex items-center justify-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-sm font-semibold transition-colors" style="padding-top:10px;padding-bottom:10px;">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                <span x-text="showSettings ? '隱藏定價' : '自訂定價'">自訂定價</span>
+            </button>
+        </div>
+
+    </header>
+
+    <section x-show="showSettings" class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-4 font-bold" style="display:none;">
+        <h2 class="text-lg font-semibold flex items-center gap-2 text-gray-800">
+            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" class="text-green-500"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            自訂筆針單支定價
+        </h2>
+        <div class="grid md:grid-cols-2 gap-8 font-normal">
+            <div class="space-y-3">
+                <h3 class="font-bold text-gray-700 border-b pb-2">猛健樂 (Mounjaro)</h3>
+                <template x-for="d in medConfig.mounjaro.buyDoses" :key="'price-m-'+d">
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm text-gray-600" x-text="d + ' mg 筆針'"></span>
+                        <div class="relative"><span class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">$</span><input type="number" x-model.number="prices.mounjaro[d]" class="pl-8 pr-3 py-1.5 w-32 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-right font-bold" /></div>
+                    </div>
+                </template>
+            </div>
+            <div class="space-y-3">
+                <h3 class="font-bold text-gray-700 border-b pb-2">週纖達 (Wegovy)</h3>
+                <template x-for="d in medConfig.wegovy.buyDoses" :key="'price-w-'+d">
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm text-gray-600" x-text="d + ' mg 筆針'"></span>
+                        <div class="relative"><span class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">$</span><input type="number" x-model.number="prices.wegovy[d]" class="pl-8 pr-3 py-1.5 w-32 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-right font-bold" /></div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </section>
+
+    <nav class="flex p-1 bg-gray-200 rounded-xl w-full md:w-fit mx-auto md:mx-0 overflow-x-auto">
+        <button @click="activeTab = 'progression'" :class="activeTab === 'progression' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'" class="whitespace-nowrap flex items-center justify-center gap-2 px-6 py-2 rounded-lg text-sm font-semibold transition-all" style="padding-top:10px;padding-bottom:10px;">
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+            標準遞增療程
+        </button>
+        <button @click="activeTab = 'custom'" :class="activeTab === 'custom' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'" class="whitespace-nowrap flex items-center justify-center gap-2 px-6 py-2 rounded-lg text-sm font-semibold transition-all" style="padding-top:10px;padding-bottom:10px;">
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="12" x2="12" y1="18" y2="22"/></svg>
+            自由編排模式
+        </button>
+        <button @click="activeTab = 'single'" :class="activeTab === 'single' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'" class="whitespace-nowrap flex items-center justify-center gap-2 px-6 py-2 rounded-lg text-sm font-semibold transition-all" style="padding-top:10px;padding-bottom:10px;">
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="m18 2 4 4"/><path d="m17 7 3-3"/><path d="M19 9 8.7 19.3c-.2.2-.5.3-.7.3H5v-3c0-.3.1-.5.3-.7L15.6 5"/><path d="m9 11 4 4"/><path d="m5 19-3 3"/><path d="m14 4 6 6"/></svg>
+            單支精算機
+        </button>
+    </nav>
+
+    <!-- Tab: 標準遞增療程 -->
+    <div x-show="activeTab === 'progression'" class="grid lg:grid-cols-12 gap-6">
+        <div class="lg:col-span-4 space-y-6">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <h2 class="text-lg font-bold mb-5 flex items-center gap-2 text-gray-800">
+                    <svg width="20" height="20" class="text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                    標準遞增設定
+                </h2>
+                <div class="mb-5">
+                    <label class="block text-sm font-bold text-gray-600 mb-2">選擇藥物</label>
+                    <div class="flex gap-2">
+                        <button @click="setProgMed('mounjaro')" :class="progMed==='mounjaro'?'bg-indigo-600 text-white shadow-md':'bg-gray-100 text-gray-600 hover:bg-gray-200'" class="flex-1 py-2 px-4 rounded-xl text-sm font-bold transition-all">猛健樂</button>
+                        <button @click="setProgMed('wegovy')" :class="progMed==='wegovy'?'bg-blue-600 text-white shadow-md':'bg-gray-100 text-gray-600 hover:bg-gray-200'" class="flex-1 py-2 px-4 rounded-xl text-sm font-bold transition-all">週纖達</button>
+                    </div>
+                </div>
+                <div class="mb-6">
+                    <label class="block text-sm font-bold text-gray-600 mb-2">最終目標劑量 (預設每階4週)</label>
+                    <select x-model.number="progTarget" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold">
+                        <template x-for="d in medConfig[progMed].targetDoses" :key="'target-opt-'+d">
+                            <option :value="d" :selected="progTarget===d" x-text="d+' mg / 週'"></option>
+                        </template>
+                    </select>
+                </div>
+                <div x-show="progMed==='wegovy'" class="pt-5 border-t border-gray-100 mb-5 bg-blue-50 bg-opacity-50 -mx-6 px-6 pb-2" x-transition>
+                    <label class="block text-sm font-bold text-blue-900 mb-3 flex items-center gap-2">
+                        <svg width="20" height="20" class="text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><rect width="18" height="14" x="3" y="8" rx="2"/><path d="M12 5a3 3 0 1 0-3 3h3Z"/><path d="M12 5a3 3 0 1 1 3 3h-3Z"/><path d="M12 8v14"/><line x1="3" x2="21" y1="12" y2="12"/></svg>
+                        套用原廠補助計畫
+                    </label>
+                    <select x-model="progSubsidy" class="w-full bg-white border border-blue-200 rounded-xl px-4 py-3 text-sm font-bold text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm cursor-pointer">
+                        <option value="none">不套用 (僅計算原價，提供費用估算)</option>
+                        <option value="wegovy_A_first">方案 A 初購 (買 3 送 1)</option>
+                        <option value="wegovy_A_renew">方案 A 續購 (買 3 送 2)</option>
+                        <option value="wegovy_B">方案 B (買 6 送 3 合併申請)</option>
+                    </select>
+                    <p x-show="progSubsidy!=='none'" class="text-blue-600 mt-2 ml-1" style="font-size:11px;">✓ 系統將自動把贈送的免費筆排入後續的施打計畫中</p>
+                </div>
+                <div class="pt-5 border-t border-gray-100">
+                    <label class="block text-sm font-bold text-gray-600 mb-3">一鍵自動購筆策略</label>
+                    <div class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start gap-3">
+                        <input type="checkbox" x-model="isFirstConservative" class="mt-1 w-4 h-4 cursor-pointer" id="conservative-prog"/>
+                        <div class="ml-1">
+                            <label for="conservative-prog" class="font-bold text-yellow-900 text-sm cursor-pointer block select-none">初次保守使用</label>
+                            <p class="text-yellow-700 mt-0.5" style="font-size:11px;">強制第 1 支筆購買最便宜的入門價位筆針，降低初期適應不良的浪費風險。</p>
+                        </div>
+                    </div>
+                    <div class="mb-4 p-3 bg-teal-50 border border-teal-200 rounded-xl flex items-start gap-3">
+                        <input type="checkbox" x-model="penToEmpty" class="mt-1 w-4 h-4 cursor-pointer" id="pentoempty-prog"/>
+                        <div class="ml-1">
+                            <label for="pentoempty-prog" class="font-bold text-teal-900 text-sm cursor-pointer block select-none">整支筆用到完 (預設)</label>
+                            <p class="text-teal-700 mt-0.5" style="font-size:11px;">病患購買整數支筆且會用完：最後一支筆的剩餘藥量，以療程結尾(目前使用中)的劑量延長施打至用完，週數、施打次數與針頭數會一併計入。</p>
+                        </div>
+                    </div>
+                    <div class="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-xl">
+                        <div class="flex items-start gap-3">
+                            <input type="checkbox" x-model="progLimitPens" class="mt-1 w-4 h-4 cursor-pointer" id="limitpens-prog"/>
+                            <div class="ml-1 flex-1">
+                                <label for="limitpens-prog" class="font-bold text-purple-900 text-sm cursor-pointer block select-none">指定購買支數</label>
+                                <p class="text-purple-700 mt-0.5" style="font-size:11px;">病患只想買固定支數：照療程劑量順序買滿指定支數、逐週用到完，超過所需的週數就停（不受原療程長度限制）。</p>
+                            </div>
+                        </div>
+                        <div x-show="progLimitPens" class="mt-3 flex items-center gap-2 pl-7" x-transition>
+                            <span class="text-xs font-bold text-purple-700">購買</span>
+                            <button @click="progPenLimit = Math.max(1, (parseInt(progPenLimit)||1) - 1)" class="w-8 h-8 shrink-0 bg-white border border-purple-300 hover:bg-purple-100 rounded-lg text-base font-bold text-purple-600 transition-colors leading-none">−</button>
+                            <input type="number" min="1" max="24" x-model.number="progPenLimit" class="w-14 text-center bg-white border border-purple-300 rounded-lg px-1 py-1.5 text-sm font-extrabold outline-none focus:ring-2 focus:ring-purple-500" />
+                            <button @click="progPenLimit = Math.min(24, (parseInt(progPenLimit)||1) + 1)" class="w-8 h-8 shrink-0 bg-white border border-purple-300 hover:bg-purple-100 rounded-lg text-base font-bold text-purple-600 transition-colors leading-none">＋</button>
+                            <span class="text-xs font-bold text-purple-700">支</span>
+                        </div>
+                    </div>
+                    <div class="space-y-3">
+                        <button @click="setProgStrategy('balanced')" :class="progStrategy==='balanced'?'border-green-500 bg-green-50 shadow-sm':'border-gray-200 bg-white hover:bg-gray-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
+                            <div class="font-bold text-sm flex items-center gap-2"><svg width="16" height="16" :class="progStrategy==='balanced'?'text-green-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>平衡花費 (推薦)</div>
+                            <div class="text-gray-500 mt-1" style="font-size:11px;">智慧跨階購買大容量筆針來拆打省錢，嚴守不倒退原則，且確保每支筆開封不超過指定的合理時間。</div>
+                        </button>
+                        <div x-show="progStrategy==='balanced'" class="px-4 py-3 bg-white border border-green-200 rounded-lg" x-transition>
+                            <div class="flex justify-between items-center mb-2"><label class="text-xs font-bold text-gray-600">合理使用時間上限：</label><span class="text-sm font-bold text-green-700" x-text="progMaxWeeks+' 週'"></span></div>
+                            <input type="range" min="4" max="8" step="1" x-model.number="progMaxWeeks" class="w-full" style="accent-color:#10B981;" />
+                            <div class="flex justify-between text-gray-400 mt-1 px-1" style="font-size:10px;"><span>4週 (嚴格)</span><span>8週 (寬鬆)</span></div>
+                        </div>
+                        <button @click="setProgStrategy('max')" :class="progStrategy==='max'?'border-indigo-500 bg-indigo-50 shadow-sm':'border-gray-200 bg-white hover:bg-gray-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
+                            <div class="font-bold text-sm flex items-center gap-2"><svg width="16" height="16" :class="progStrategy==='max'?'text-indigo-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M19 5c-1.5 0-2.8 1.4-3 2-3.5-1.5-11-.3-11 5 0 1.8 0 3 2 4.5V20a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-1a5 5 0 0 0 5 0v1a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-3.5c2-1.5 2-2.7 2-4.5 0-5.3-7.5-6.5-11-5"/><path d="M7 14h.01"/><path d="M11 11h.01"/></svg>極致省錢</div>
+                            <div class="text-gray-500 mt-1" style="font-size:11px;">全程買最大容量。總支付花費最低，但初期單支可能需打超過2個月。</div>
+                        </button>
+                        <button @click="setProgStrategy('standard')" :class="progStrategy==='standard'?'border-blue-500 bg-blue-50 shadow-sm':'border-gray-200 bg-white hover:bg-gray-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
+                            <div class="font-bold text-sm flex items-center gap-2"><svg width="16" height="16" :class="progStrategy==='standard'?'text-blue-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg>原廠標準</div>
+                            <div class="text-gray-500 mt-1" style="font-size:11px;">打多少買多少，確保筆針最新鮮。總花費通常較高。</div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="lg:col-span-8 font-bold">
+            <template x-if="progPlan">
+                <div class="space-y-6">
+                    <div x-html="renderPlanSummary(progPlan, progMed, 'progression')"></div>
+                    <div x-html="renderPlanDetailList(progPlan, progMed, 'progression')"></div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Tab: 自由編排模式 -->
+    <div x-show="activeTab === 'custom'" class="grid lg:grid-cols-12 gap-6">
+        <div class="lg:col-span-4 space-y-6">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <h2 class="text-lg font-bold mb-5 flex items-center gap-2 text-gray-800">
+                    <svg width="20" height="20" class="text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="12" x2="12" y1="18" y2="22"/></svg>
+                    自由編排設定
+                </h2>
+                <div class="mb-5">
+                    <label class="block text-sm font-bold text-gray-600 mb-2">選擇藥物</label>
+                    <div class="flex gap-2">
+                        <button @click="setCustomMed('mounjaro')" :class="customMed==='mounjaro'?'bg-indigo-600 text-white shadow-md':'bg-gray-100 text-gray-600 hover:bg-gray-200'" class="flex-1 py-2 px-4 rounded-xl text-sm font-bold transition-all">猛健樂</button>
+                        <button @click="setCustomMed('wegovy')" :class="customMed==='wegovy'?'bg-blue-600 text-white shadow-md':'bg-gray-100 text-gray-600 hover:bg-gray-200'" class="flex-1 py-2 px-4 rounded-xl text-sm font-bold transition-all">週纖達</button>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3 mb-6">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 mb-1">起始劑量</label>
+                        <select x-model.number="customStart" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-bold">
+                            <template x-for="d in medConfig[customMed].targetDoses" :key="'start-opt-'+d">
+                                <option :value="d" :selected="customStart===d" x-text="d+' mg'"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 mb-1">維持劑量 (Peak)</label>
+                        <select x-model.number="customPeak" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-bold">
+                            <template x-for="d in medConfig[customMed].targetDoses" :key="'peak-opt-'+d">
+                                <option :value="d" :selected="customPeak===d" x-text="d+' mg'"></option>
+                            </template>
+                        </select>
+                    </div>
+                </div>
+                <div class="pt-5 border-t border-gray-100">
+                    <label class="block text-sm font-bold text-gray-600 mb-3">療程階段與長度設定</label>
+                    <div class="space-y-2 overflow-y-auto pr-1" style="max-height:30vh;">
+                        <template x-for="(b, index) in customBlocks" :key="b.id">
+                            <div class="flex justify-between items-center p-3 bg-gray-50 border border-gray-200 rounded-xl hover:bg-gray-100">
+                                <div>
+                                    <div :class="b.phase==='維持期'?'text-indigo-600':'text-gray-500'" class="text-xs font-bold mb-0.5" x-text="b.phase"></div>
+                                    <div class="font-bold text-slate-700" x-text="b.dose+' mg'"></div>
+                                </div>
+                                <div class="flex items-center gap-1.5">
+                                    <button @click="handleCustomBlockChange(index, Math.max(0, (parseInt(b.weeks)||0) - 1))" class="w-8 h-8 shrink-0 bg-white border border-gray-300 hover:bg-gray-100 rounded-lg text-base font-bold text-gray-600 transition-colors leading-none">−</button>
+                                    <input type="number" min="0" max="104" :value="b.weeks" @change="handleCustomBlockChange(index, Math.min(104, Math.max(0, parseInt($event.target.value)||0)))" class="w-14 text-center bg-white border border-gray-300 rounded-lg px-1 py-1.5 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500" />
+                                    <span class="text-xs font-bold text-gray-500 w-7" x-text="b.weeks===0?'跳過':'週'"></span>
+                                    <button @click="handleCustomBlockChange(index, Math.min(104, (parseInt(b.weeks)||0) + 1))" class="w-8 h-8 shrink-0 bg-white border border-gray-300 hover:bg-gray-100 rounded-lg text-base font-bold text-gray-600 transition-colors leading-none">＋</button>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+                <div x-show="customMed==='wegovy'" class="pt-5 border-t border-gray-100 mt-5 bg-blue-50 bg-opacity-50 -mx-6 px-6 pb-2" x-transition>
+                    <label class="block text-sm font-bold text-blue-900 mb-3 flex items-center gap-2">
+                        <svg width="20" height="20" class="text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><rect width="18" height="14" x="3" y="8" rx="2"/><path d="M12 5a3 3 0 1 0-3 3h3Z"/><path d="M12 5a3 3 0 1 1 3 3h-3Z"/><path d="M12 8v14"/><line x1="3" x2="21" y1="12" y2="12"/></svg>
+                        套用原廠補助計畫
+                    </label>
+                    <select x-model="customSubsidy" class="w-full bg-white border border-blue-200 rounded-xl px-4 py-3 text-sm font-bold text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm cursor-pointer">
+                        <option value="none">不套用 (僅計算原價，提供費用估算)</option>
+                        <option value="wegovy_A_first">方案 A 初購 (買 3 送 1)</option>
+                        <option value="wegovy_A_renew">方案 A 續購 (買 3 送 2)</option>
+                        <option value="wegovy_B">方案 B (買 6 送 3 合併申請)</option>
+                    </select>
+                    <p x-show="customSubsidy!=='none'" class="text-blue-600 mt-2 ml-1" style="font-size:11px;">✓ 系統將自動把贈送的免費筆排入後續的施打計畫中</p>
+                </div>
+                <div class="pt-5 border-t border-gray-100 mt-5">
+                    <label class="block text-sm font-bold text-gray-600 mb-3">一鍵自動購筆策略</label>
+                    <div class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start gap-3">
+                        <input type="checkbox" x-model="isFirstConservative" class="mt-1 w-4 h-4 cursor-pointer" id="conservative-custom"/>
+                        <div class="ml-1">
+                            <label for="conservative-custom" class="font-bold text-yellow-900 text-sm cursor-pointer block select-none">初次保守使用</label>
+                            <p class="text-yellow-700 mt-0.5" style="font-size:11px;">強制第 1 支筆購買最便宜的入門價位筆針，降低初期適應不良的浪費風險。</p>
+                        </div>
+                    </div>
+                    <div class="mb-4 p-3 bg-teal-50 border border-teal-200 rounded-xl flex items-start gap-3">
+                        <input type="checkbox" x-model="penToEmpty" class="mt-1 w-4 h-4 cursor-pointer" id="pentoempty-custom"/>
+                        <div class="ml-1">
+                            <label for="pentoempty-custom" class="font-bold text-teal-900 text-sm cursor-pointer block select-none">整支筆用到完 (預設)</label>
+                            <p class="text-teal-700 mt-0.5" style="font-size:11px;">病患購買整數支筆且會用完：最後一支筆的剩餘藥量，以療程結尾(目前使用中)的劑量延長施打至用完，週數、施打次數與針頭數會一併計入。</p>
+                        </div>
+                    </div>
+                    <div class="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-xl">
+                        <div class="flex items-start gap-3">
+                            <input type="checkbox" x-model="customLimitPens" class="mt-1 w-4 h-4 cursor-pointer" id="limitpens-custom"/>
+                            <div class="ml-1 flex-1">
+                                <label for="limitpens-custom" class="font-bold text-purple-900 text-sm cursor-pointer block select-none">指定購買支數</label>
+                                <p class="text-purple-700 mt-0.5" style="font-size:11px;">病患只想買固定支數：照療程劑量順序買滿指定支數、逐週用到完，超過所需的週數就停（不受原療程長度限制）。</p>
+                            </div>
+                        </div>
+                        <div x-show="customLimitPens" class="mt-3 flex items-center gap-2 pl-7" x-transition>
+                            <span class="text-xs font-bold text-purple-700">購買</span>
+                            <button @click="customPenLimit = Math.max(1, (parseInt(customPenLimit)||1) - 1)" class="w-8 h-8 shrink-0 bg-white border border-purple-300 hover:bg-purple-100 rounded-lg text-base font-bold text-purple-600 transition-colors leading-none">−</button>
+                            <input type="number" min="1" max="24" x-model.number="customPenLimit" class="w-14 text-center bg-white border border-purple-300 rounded-lg px-1 py-1.5 text-sm font-extrabold outline-none focus:ring-2 focus:ring-purple-500" />
+                            <button @click="customPenLimit = Math.min(24, (parseInt(customPenLimit)||1) + 1)" class="w-8 h-8 shrink-0 bg-white border border-purple-300 hover:bg-purple-100 rounded-lg text-base font-bold text-purple-600 transition-colors leading-none">＋</button>
+                            <span class="text-xs font-bold text-purple-700">支</span>
+                        </div>
+                    </div>
+                    <div class="space-y-3">
+                        <button @click="setCustomStrategy('balanced')" :class="customStrategy==='balanced'?'border-green-500 bg-green-50 shadow-sm':'border-gray-200 bg-white hover:bg-slate-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
+                            <div class="font-bold text-sm flex items-center gap-2"><svg width="16" height="16" :class="customStrategy==='balanced'?'text-green-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>平衡花費 (推薦)</div>
+                            <div class="text-gray-500 mt-1" style="font-size:11px;">智慧跨階購買大容量筆針來拆打省錢，嚴守不倒退原則，且確保每支筆開封不超過指定的合理時間。</div>
+                        </button>
+                        <div x-show="customStrategy==='balanced'" class="px-4 py-3 bg-white border border-green-200 rounded-lg" x-transition>
+                            <div class="flex justify-between items-center mb-2"><label class="text-xs font-bold text-gray-600">合理使用時間上限：</label><span class="text-sm font-bold text-green-700" x-text="customMaxWeeks+' 週'"></span></div>
+                            <input type="range" min="4" max="8" step="1" x-model.number="customMaxWeeks" class="w-full" style="accent-color:#10B981;" />
+                            <div class="flex justify-between text-gray-400 mt-1 px-1" style="font-size:10px;"><span>4週 (嚴格)</span><span>8週 (寬鬆)</span></div>
+                        </div>
+                        <button @click="setCustomStrategy('max')" :class="customStrategy==='max'?'border-indigo-500 bg-indigo-50 shadow-sm':'border-gray-200 bg-white hover:bg-slate-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
+                            <div class="font-bold text-sm flex items-center gap-2"><svg width="16" height="16" :class="customStrategy==='max'?'text-indigo-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M19 5c-1.5 0-2.8 1.4-3 2-3.5-1.5-11-.3-11 5 0 1.8 0 3 2 4.5V20a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-1a5 5 0 0 0 5 0v1a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-3.5c2-1.5 2-2.7 2-4.5 0-5.3-7.5-6.5-11-5"/><path d="M7 14h.01"/><path d="M11 11h.01"/></svg>極致省錢</div>
+                            <div class="text-gray-500 mt-1" style="font-size:11px;">全程買最大容量。總支付花費最低，但初期單支可能需打超過2個月。</div>
+                        </button>
+                        <button @click="setCustomStrategy('standard')" :class="customStrategy==='standard'?'border-blue-500 bg-blue-50 shadow-sm':'border-gray-200 bg-white hover:bg-gray-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
+                            <div class="font-bold text-sm flex items-center gap-2"><svg width="16" height="16" :class="customStrategy==='standard'?'text-blue-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg>原廠標準</div>
+                            <div class="text-gray-500 mt-1" style="font-size:11px;">打多少買多少，確保筆針最新鮮。總花費通常較高。</div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="lg:col-span-8 font-bold">
+            <template x-if="customPlan && customPlan.totalWeeks === 0">
+                <div class="flex items-center justify-center bg-white rounded-2xl border border-gray-100 text-gray-400 p-12 font-medium">請設定至少大於 0 週的療程階段。</div>
+            </template>
+            <template x-if="customPlan && customPlan.totalWeeks > 0">
+                <div class="space-y-6">
+                    <div x-html="renderPlanSummary(customPlan, customMed, 'custom')"></div>
+                    <div x-html="renderPlanDetailList(customPlan, customMed, 'custom')"></div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Tab: 單支精算機 -->
+    <div x-show="activeTab === 'single'" class="grid lg:grid-cols-12 gap-6">
+        <div class="lg:col-span-5 space-y-6">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <h2 class="text-lg font-bold mb-5 flex items-center gap-2">
+                    <svg width="20" height="20" class="text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="m18 2 4 4"/><path d="m17 7 3-3"/><path d="M19 9 8.7 19.3c-.2.2-.5.3-.7.3H5v-3c0-.3.1-.5.3-.7L15.6 5"/><path d="m9 11 4 4"/><path d="m5 19-3 3"/><path d="m14 4 6 6"/></svg>
+                    單筆施打設定
+                </h2>
+                <div class="mb-6">
+                    <label class="block text-sm font-bold text-gray-600 mb-2">選擇藥物</label>
+                    <div class="flex gap-2">
+                        <button @click="setSingleMed('mounjaro')" :class="singleMed==='mounjaro'?'bg-indigo-600 text-white shadow-md':'bg-gray-100 text-gray-600 hover:bg-gray-200'" class="flex-1 py-2.5 px-4 rounded-xl text-sm font-bold transition-all">猛健樂</button>
+                        <button @click="setSingleMed('wegovy')" :class="singleMed==='wegovy'?'bg-blue-600 text-white shadow-md':'bg-gray-100 text-gray-600 hover:bg-gray-200'" class="flex-1 py-2.5 px-4 rounded-xl text-sm font-bold transition-all">週纖達</button>
+                    </div>
+                </div>
+                <div class="space-y-5">
+                    <div>
+                        <label class="block text-sm font-bold text-gray-600 mb-2">目標施打劑量 (每週)</label>
+                        <select x-model.number="targetDose" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 font-bold">
+                            <template x-for="d in medConfig[singleMed].targetDoses" :key="'st-opt-'+d">
+                                <option :value="d" :selected="targetDose===d" x-text="d+' mg / 週'"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-gray-600 mb-2">購買的筆針劑量</label>
+                        <select x-model.number="buyDose" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 font-bold">
+                            <template x-for="d in medConfig[singleMed].buyDoses" :key="'sb-opt-'+d">
+                                <option :value="d" :selected="buyDose===d" x-text="d+' mg (售價 $'+(prices[singleMed]?.[d]||0).toLocaleString()+')'"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-gray-600 mb-2">預計購買支數</label>
+                        <div class="flex items-center gap-2">
+                            <button @click="penCount = Math.max(1, (parseInt(penCount)||1) - 1)" class="w-12 h-12 shrink-0 bg-gray-100 hover:bg-gray-200 rounded-xl text-xl font-bold text-gray-600 transition-colors">−</button>
+                            <input type="number" min="1" max="24" x-model.number="penCount" class="flex-1 text-center bg-gray-50 border border-gray-200 rounded-xl px-2 py-3 focus:ring-2 focus:ring-blue-500 font-extrabold text-lg" />
+                            <button @click="penCount = Math.min(24, (parseInt(penCount)||1) + 1)" class="w-12 h-12 shrink-0 bg-gray-100 hover:bg-gray-200 rounded-xl text-xl font-bold text-gray-600 transition-colors">＋</button>
+                        </div>
+                        <p class="text-gray-400 mt-1.5 ml-1" style="font-size:11px;">門診常見情境：病患以「要買幾支」決定，下方會顯示整批購買的總價、可用週數與針頭需求。</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="lg:col-span-7 space-y-6">
+            <template x-if="singleCalc">
+                <div class="space-y-6">
+                    <div class="bg-gray-800 text-white p-6 rounded-2xl shadow-lg relative overflow-hidden" style="background:linear-gradient(135deg,#1f2937,#111827);">
+                        <div class="absolute top-0 right-0 p-32 bg-white bg-opacity-5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
+                        <div class="flex justify-between items-center mb-6 border-b border-gray-700 pb-4 relative z-10">
+                            <h2 class="text-xl font-bold text-gray-100">單支試算結果</h2>
+                            <button @click="handleExportText()" class="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500 bg-opacity-80 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold transition-colors">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                                匯出衛教單
+                            </button>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mb-6 relative z-10">
+                            <div class="bg-white bg-opacity-10 rounded-xl p-4 border border-white border-opacity-10">
+                                <div class="text-gray-300 text-sm mb-1 font-bold">每次需轉格數</div>
+                                <div class="text-3xl font-bold text-white" x-text="singleCalc.requiredClicks+' 格'"></div>
+                                <div class="text-xs text-yellow-300 mt-1" x-show="singleCalc.needsMultipleShots" x-text="'(滿格 '+singleCalc.maxClicks+' + '+(singleCalc.requiredClicks-singleCalc.maxClicks)+'格)'"></div>
+                                <div class="text-xs text-gray-400 mt-1" x-show="!singleCalc.needsMultipleShots" x-text="'(滿格為 '+singleCalc.maxClicks+')'"></div>
+                            </div>
+                            <div class="bg-white bg-opacity-10 rounded-xl p-4 border border-white border-opacity-10">
+                                <div class="text-gray-300 text-sm mb-1 font-bold">一支筆可打</div>
+                                <div class="text-3xl font-bold text-white" x-text="singleCalc.weeksPerPen.toFixed(1)+' 週'"></div>
+                                <div class="text-yellow-400 mt-1 flex items-center gap-1" style="font-size:11px;" x-show="singleCalc.extraNeedles > 0">
+                                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+                                    <span x-text="'需另購 '+singleCalc.extraNeedles+' 個針頭'"></span>
+                                </div>
+                                <div class="text-green-400 mt-1 flex items-center gap-1" style="font-size:11px;" x-show="singleCalc.extraNeedles===0">
+                                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>
+                                    內附針頭足夠
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-xl p-5 text-gray-800 shadow-inner relative z-10">
+                            <div class="flex justify-between items-center border-b border-gray-100 pb-3 mb-3">
+                                <div class="text-sm font-bold text-gray-500">無補助 平均單週花費</div>
+                                <div class="font-extrabold text-gray-700 text-lg" x-text="'$'+Math.round(singleCalc.costPerWeek).toLocaleString()+' /週'"></div>
+                            </div>
+                            <div class="text-sm font-bold text-gray-500 mb-1">無補助 平均每月花費</div>
+                            <div class="flex items-end gap-2">
+                                <div class="text-4xl font-black text-gray-900" x-text="'$'+Math.round(singleCalc.costPerMonth||0).toLocaleString()"></div>
+                                <div class="text-gray-500 mb-1 font-bold">/ 4 週</div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 整批購買試算 (以支數為考量) -->
+                    <template x-if="multiPenCalc">
+                        <div class="bg-teal-50 p-6 rounded-2xl shadow-sm border border-teal-100 space-y-4">
+                            <div class="flex justify-between items-center">
+                                <h3 class="text-lg font-bold text-teal-900 flex items-center gap-2">
+                                    <svg width="20" height="20" class="text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg>
+                                    整批購買試算
+                                </h3>
+                                <span class="text-sm font-extrabold text-teal-700 bg-teal-100 px-3 py-1 rounded-lg" x-text="'共 '+multiPenCalc.n+' 支 ('+singleCalc.safeBuyDose+' mg)'"></span>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="bg-white rounded-xl p-4 border border-teal-100 shadow-sm">
+                                    <div class="text-xs font-bold text-gray-500 mb-1">所需總價格</div>
+                                    <div class="text-2xl font-black text-teal-700" x-text="'$'+multiPenCalc.totalCost.toLocaleString()"></div>
+                                    <div class="text-gray-400 mt-0.5" style="font-size:10px;" x-text="'$'+singleCalc.penPrice.toLocaleString()+' x '+multiPenCalc.n+' 支'"></div>
+                                </div>
+                                <div class="bg-white rounded-xl p-4 border border-teal-100 shadow-sm">
+                                    <div class="text-xs font-bold text-gray-500 mb-1">可施打週數 (用到完)</div>
+                                    <div class="text-2xl font-black text-teal-700" x-text="multiPenCalc.weeks+' 週'"></div>
+                                    <div class="text-gray-400 mt-0.5" style="font-size:10px;" x-text="'約 '+(multiPenCalc.weeks/4.345).toFixed(1)+' 個月'+(multiPenCalc.finalPartialMg>0.001?'，最後一週僅剩 '+multiPenCalc.finalPartialMg.toFixed(2)+' mg':'')"></div>
+                                </div>
+                                <div class="bg-white rounded-xl p-4 border border-teal-100 shadow-sm">
+                                    <div class="text-xs font-bold text-gray-500 mb-1">預估總施打次數</div>
+                                    <div class="text-2xl font-black text-gray-800" x-text="multiPenCalc.shots+' 次'"></div>
+                                    <div class="text-gray-400 mt-0.5" style="font-size:10px;" x-text="multiPenCalc.crossWeeks>0?('含 '+multiPenCalc.crossWeeks+' 週需跨筆拆打'):'無需跨筆拆打'"></div>
+                                </div>
+                                <div class="bg-white rounded-xl p-4 border border-teal-100 shadow-sm">
+                                    <div class="text-xs font-bold text-gray-500 mb-1">需加購針頭</div>
+                                    <div class="text-2xl font-black" :class="multiPenCalc.extraNeedles>0?'text-yellow-600':'text-green-600'" x-text="multiPenCalc.extraNeedles+' 個'"></div>
+                                    <div class="text-gray-400 mt-0.5" style="font-size:10px;" x-text="singleMed==='wegovy'?('原廠附 '+multiPenCalc.freeNeedles+' 個 (每支4個)'):'猛健樂不附針頭，須全數加購'"></div>
+                                </div>
+                            </div>
+                            <div class="bg-white rounded-xl p-4 border border-teal-100 shadow-sm flex justify-between items-center">
+                                <div class="text-sm font-bold text-gray-600">平均每月 (每4週) 花費</div>
+                                <div class="text-xl font-extrabold text-teal-700" x-text="'$'+Math.round(multiPenCalc.avgMonthly).toLocaleString()"></div>
+                            </div>
+                            <div x-show="multiPenCalc.subsidyHint" class="text-xs text-blue-800 bg-blue-50 border border-blue-100 p-3 rounded-lg font-bold flex items-start gap-2">
+                                <svg width="16" height="16" class="text-blue-500 shrink-0" style="margin-top:1px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><rect width="18" height="14" x="3" y="8" rx="2"/><path d="M12 5a3 3 0 1 0-3 3h3Z"/><path d="M12 5a3 3 0 1 1 3 3h-3Z"/><path d="M12 8v14"/><line x1="3" x2="21" y1="12" y2="12"/></svg>
+                                <span x-text="multiPenCalc.subsidyHint"></span>
+                            </div>
+                        </div>
+                    </template>
+                    <div x-show="singleMed==='wegovy' && singleCalc.subsidy" class="bg-blue-50 p-6 rounded-2xl shadow-sm border border-blue-100 space-y-4" x-transition>
+                        <h3 class="text-lg font-bold text-blue-900 flex items-center gap-2">
+                            <svg width="20" height="20" class="text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg>
+                            週纖達補助計畫試算
+                        </h3>
+                        <div class="space-y-4 font-bold">
+                            <div class="bg-white rounded-xl border border-blue-50 overflow-hidden shadow-sm">
+                                <div class="bg-blue-100 bg-opacity-50 p-3 border-b border-blue-50"><div class="font-bold text-blue-900 text-sm">方案 A 初購：買 3 送 1</div><div class="text-blue-600" style="font-size:10px;">相當於 7.5 折</div></div>
+                                <div class="p-3 grid grid-cols-2 divide-x divide-gray-100"><div class="px-2"><div class="text-gray-500 mb-0.5" style="font-size:10px;">預估單週花費</div><div class="font-bold text-blue-700" x-text="'$'+Math.round(singleCalc.subsidyWeekly.buy3get1).toLocaleString()"></div></div><div class="px-2 text-right"><div class="text-gray-500 mb-0.5" style="font-size:10px;">預估每月(4週)花費</div><div class="font-bold text-blue-700 text-lg" x-text="'$'+Math.round(singleCalc.subsidy.buy3get1).toLocaleString()"></div></div></div>
+                            </div>
+                            <div class="bg-white rounded-xl border border-blue-50 overflow-hidden shadow-sm">
+                                <div class="bg-blue-100 bg-opacity-50 p-3 border-b border-blue-50"><div class="font-bold text-blue-900 text-sm">方案 A 續購：買 3 送 2</div><div class="text-blue-600" style="font-size:10px;">相當於 6 折</div></div>
+                                <div class="p-3 grid grid-cols-2 divide-x divide-gray-100"><div class="px-2"><div class="text-gray-500 mb-0.5" style="font-size:10px;">預估單週花費</div><div class="font-bold text-blue-700" x-text="'$'+Math.round(singleCalc.subsidyWeekly.buy3get2).toLocaleString()"></div></div><div class="px-2 text-right"><div class="text-gray-500 mb-0.5" style="font-size:10px;">預估每月(4週)花費</div><div class="font-bold text-blue-700 text-lg" x-text="'$'+Math.round(singleCalc.subsidy.buy3get2).toLocaleString()"></div></div></div>
+                            </div>
+                            <div class="bg-white rounded-xl border border-blue-50 overflow-hidden shadow-sm">
+                                <div class="bg-blue-100 bg-opacity-50 p-3 border-b border-blue-50"><div class="font-bold text-blue-900 text-sm">方案 B (合併申請)：買 6 送 3</div><div class="text-blue-600" style="font-size:10px;">相當於約 6.6 折</div></div>
+                                <div class="p-3 grid grid-cols-2 divide-x divide-gray-100"><div class="px-2"><div class="text-gray-500 mb-0.5" style="font-size:10px;">預估單週花費</div><div class="font-bold text-blue-700" x-text="'$'+Math.round(singleCalc.subsidyWeekly.buy6get3).toLocaleString()"></div></div><div class="px-2 text-right"><div class="text-gray-500 mb-0.5" style="font-size:10px;">預估每月(4週)花費</div><div class="font-bold text-blue-700 text-lg" x-text="'$'+Math.round(singleCalc.subsidy.buy6get3).toLocaleString()"></div></div></div>
+                            </div>
+                        </div>
+                        <div class="mt-4 bg-blue-100 bg-opacity-50 border border-blue-200 p-3 rounded-xl flex items-start gap-2">
+                            <svg width="20" height="20" class="text-yellow-500 shrink-0" style="margin-top:2px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .6 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>
+                            <div class="text-sm text-blue-900 leading-relaxed font-bold">
+                                <span x-show="(singleCalc.weeksPerPen * 6) > 24">💡 若一次買 6 支會使用超過半年，強烈建議選擇 <strong class="text-blue-700 underline">方案 A (初購 買 3 送 1)</strong>！</span>
+                                <span x-show="(singleCalc.weeksPerPen * 6) <= 24" x-text="'💡 買 6 支大約 '+((singleCalc.weeksPerPen*6)/4).toFixed(1)+' 個月內可用完。建議選擇方案 B (買 6 送 3)！'"></span>
+                            </div>
+                        </div>
+                        <div class="mt-3 text-xs text-blue-800 bg-white p-3 rounded-lg space-y-2 border border-blue-100">
+                            <div class="font-bold text-blue-700">💡 補助重點提醒：</div>
+                            <ul class="list-disc pl-4 space-y-1 font-bold">
+                                <li><strong>申請時限</strong>：必須在買到第 3 支筆後的 60 天內提出申請。</li>
+                                <li><strong>方案 A</strong>：須於半年內買齊 3 支。</li>
+                                <li><strong>方案 B</strong>：半年內買齊前 3 支，後續 3 支需於前 3 支買齊後 60 天內完成購買。</li>
+                                <li><strong>贈藥限制</strong>：贈送的筆針劑量，必須「大於或等於」您購買紀錄中的最大劑量。</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+    <!-- ===== 週纖達補助時程試算 彈出視窗 ===== -->
+    <div x-show="showSubsidyTimer" class="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto" style="display:none; background:rgba(15,23,42,0.55);" @click.self="showSubsidyTimer = false" x-transition>
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-6" @click.stop>
+            <div class="flex justify-between items-center px-6 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl z-10">
+                <h2 class="text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <span class="p-2 bg-blue-100 text-blue-600 rounded-lg"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
+                    週纖達補助時程試算
+                </h2>
+                <button @click="showSubsidyTimer = false" class="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
+                </button>
+            </div>
+
+            <div class="px-6 py-5 space-y-5">
+                <!-- 補助規則摘要 -->
+                <div class="bg-blue-50 border border-blue-100 rounded-xl p-3 text-xs text-blue-800 leading-relaxed font-medium">
+                    <div class="font-bold text-blue-700 mb-1">📋 補助購買期限規則</div>
+                    每 3 支的購買期間不得超過 <strong>6 個月</strong>；且須於<strong>購買第 3 支筆後 60 天內</strong>提出補助申請。
+                </div>
+
+                <!-- 試算 1：最晚購買第 3 支 -->
+                <div class="border border-gray-200 rounded-xl p-4">
+                    <div class="flex items-center gap-2 mb-3">
+                        <span class="flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-xs font-extrabold">1</span>
+                        <span class="font-bold text-gray-800 text-sm">最晚要在幾月幾號前買第 3 支？</span>
+                    </div>
+                    <label class="block text-xs font-bold text-gray-500 mb-1.5">輸入「第 1 支筆」購買日期</label>
+                    <input type="date" x-model="timerPen1Date" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                    <div x-show="timerPen1Date" class="mt-3 bg-indigo-50 border border-indigo-100 rounded-lg p-3">
+                        <div class="text-xs text-indigo-500 font-bold mb-0.5">第 3 支筆最晚應於此日前購買完成</div>
+                        <div class="text-base font-extrabold text-indigo-700" x-text="fmtDate(timerPen3Deadline)"></div>
+                        <div class="text-xs text-indigo-400 mt-1 font-medium" x-show="daysUntil(timerPen3Deadline) !== null" x-text="daysUntil(timerPen3Deadline) >= 0 ? ('距今約 ' + daysUntil(timerPen3Deadline) + ' 天') : ('此期限已過 ' + Math.abs(daysUntil(timerPen3Deadline)) + ' 天')"></div>
+                    </div>
+                </div>
+
+                <!-- 試算 2：最晚申請補助 -->
+                <div class="border border-gray-200 rounded-xl p-4">
+                    <div class="flex items-center gap-2 mb-3">
+                        <span class="flex items-center justify-center w-6 h-6 rounded-full bg-green-100 text-green-700 text-xs font-extrabold">2</span>
+                        <span class="font-bold text-gray-800 text-sm">最晚要在幾月幾號前申請補助？</span>
+                    </div>
+                    <label class="block text-xs font-bold text-gray-500 mb-1.5">輸入「第 3 支筆」購買日期</label>
+                    <input type="date" x-model="timerPen3Date" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500" />
+                    <div x-show="timerPen3Date" class="mt-3 bg-green-50 border border-green-100 rounded-lg p-3">
+                        <div class="text-xs text-green-600 font-bold mb-0.5">補助申請最晚應於此日前提出（第 3 支後 60 天）</div>
+                        <div class="text-base font-extrabold text-green-700" x-text="fmtDate(timerApplyDeadline)"></div>
+                        <div class="text-xs text-green-500 mt-1 font-medium" x-show="daysUntil(timerApplyDeadline) !== null" x-text="daysUntil(timerApplyDeadline) >= 0 ? ('距今約 ' + daysUntil(timerApplyDeadline) + ' 天') : ('此期限已過 ' + Math.abs(daysUntil(timerApplyDeadline)) + ' 天')"></div>
+                    </div>
+                </div>
+
+                <!-- 試算 3：現有療程是否符合補助 -->
+                <div class="border border-gray-200 rounded-xl p-4">
+                    <div class="flex items-center gap-2 mb-3">
+                        <span class="flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-700 text-xs font-extrabold">3</span>
+                        <span class="font-bold text-gray-800 text-sm">目前設定的療程能否符合補助？</span>
+                    </div>
+                    <template x-if="subsidyTimerCheck.status === 'ok'">
+                        <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+                            <div class="font-bold text-green-700 text-sm flex items-center gap-1.5"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg><span x-text="subsidyTimerCheck.title"></span></div>
+                            <div class="text-xs text-green-800 mt-1.5 leading-relaxed font-medium" x-text="subsidyTimerCheck.msg"></div>
+                            <div class="text-xs text-green-600 mt-1 font-medium" x-text="'（依據：' + subsidyTimerCheck.src + '）'"></div>
+                            <div x-show="subsidyTimerCheck.projected" class="mt-2 pt-2 border-t border-green-200 text-xs font-bold" :class="subsidyTimerCheck.projWithin ? 'text-green-700' : 'text-red-600'">
+                                <span x-text="'套用您輸入的第 1 支日期，預估第 3 支約於 ' + fmtDate(subsidyTimerCheck.projected) + ' 購買'"></span>
+                                <span x-text="subsidyTimerCheck.projWithin ? '（仍在 6 個月內 ✓）' : '（已超過 6 個月，請留意 ⚠️）'"></span>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="subsidyTimerCheck.status === 'risk'">
+                        <div class="bg-red-50 border border-red-200 rounded-lg p-3">
+                            <div class="font-bold text-red-700 text-sm flex items-center gap-1.5"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg><span x-text="subsidyTimerCheck.title"></span></div>
+                            <div class="text-xs text-red-800 mt-1.5 leading-relaxed font-medium" x-text="subsidyTimerCheck.msg"></div>
+                            <div class="text-xs text-red-600 mt-1 font-medium" x-text="'（依據：' + subsidyTimerCheck.src + '）'"></div>
+                        </div>
+                    </template>
+                    <template x-if="['insufficient','notwegovy','none'].includes(subsidyTimerCheck.status)">
+                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                            <div class="font-bold text-gray-600 text-sm flex items-center gap-1.5"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg><span x-text="subsidyTimerCheck.title"></span></div>
+                            <div class="text-xs text-gray-600 mt-1.5 leading-relaxed font-medium" x-text="subsidyTimerCheck.msg"></div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- 免責聲明 -->
+                <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-3 flex items-start gap-2">
+                    <svg width="18" height="18" class="text-yellow-500 shrink-0" style="margin-top:1px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>
+                    <div class="text-xs text-yellow-800 leading-relaxed font-medium">
+                        <strong class="font-bold">⚠️ 免責聲明：</strong>本工具之日期與資格試算僅為「概略排程參考」，採曆法月份與整週估算，可能與實際情況有誤差。療程資格判斷係依目前分頁的劑量排程推估，實際購買時點會因個人施打狀況、回診時間而變動。所有補助方案之最終資格、申請期限與審核結果，<strong class="font-bold">請務必以原廠藥廠公告與醫療院所之實際規定為準</strong>。本試算不構成任何補助保證。
+                    </div>
+                </div>
+
+                <button @click="showSubsidyTimer = false" class="w-full py-3 bg-gray-800 hover:bg-gray-900 text-white font-bold rounded-xl transition-colors">關閉</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer 版權與免責聲明 -->
+    <footer class="mt-2 px-2 pb-6">
+        <div class="max-w-6xl mx-auto border-t border-gray-200 pt-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs text-gray-400 font-medium">
+            <div class="flex items-center gap-1.5">
+                <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" class="shrink-0"><path d="M20 7H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+                <span>本系統由 <strong class="text-gray-600">新光醫院家庭醫學科 林醫師</strong> 製作</span>
+            </div>
+            <div class="text-gray-400 leading-relaxed">
+                ⚠️ 本系統不保證內容之正確性，處方醫師需自行審慎檢查評估，實際用藥請以醫師判斷為準。
+            </div>
+        </div>
+    </footer>
+
+</div>
+</body>
+</html>
