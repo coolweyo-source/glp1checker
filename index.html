@@ -1,7 +1,8 @@
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <!-- Google tag (gtag.js) -->
+        <!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-3LL2ENLHGH"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -727,40 +728,17 @@
                     <p x-show="progSubsidy!=='none'" class="text-blue-600 mt-2 ml-1" style="font-size:11px;">✓ 系統將自動把贈送的免費筆排入後續的施打計畫中</p>
                 </div>
                 <div class="pt-5 border-t border-gray-100">
-                    <label class="block text-sm font-bold text-gray-600 mb-3">一鍵自動購筆策略</label>
-                    <div class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start gap-3">
-                        <input type="checkbox" x-model="isFirstConservative" class="mt-1 w-4 h-4 cursor-pointer" id="conservative-prog"/>
-                        <div class="ml-1">
-                            <label for="conservative-prog" class="font-bold text-yellow-900 text-sm cursor-pointer block select-none">初次保守使用</label>
-                            <p class="text-yellow-700 mt-0.5" style="font-size:11px;">強制第 1 支筆購買最便宜的入門價位筆針，降低初期適應不良的浪費風險。</p>
+                    <!-- STEP 1：採購策略 -->
+                    <div class="flex items-center gap-2 mb-3">
+                        <span class="flex items-center justify-center w-6 h-6 rounded-full bg-gray-800 text-white shrink-0" style="font-size:13px;font-weight:800;">1</span>
+                        <div class="leading-tight">
+                            <span class="block text-sm font-bold text-gray-800">選擇採購策略</span>
+                            <span class="text-gray-400" style="font-size:11px;">三選一 · 新手直接用「推薦」即可</span>
                         </div>
                     </div>
-                    <div class="mb-4 p-3 bg-teal-50 border border-teal-200 rounded-xl flex items-start gap-3">
-                        <input type="checkbox" x-model="penToEmpty" class="mt-1 w-4 h-4 cursor-pointer" id="pentoempty-prog"/>
-                        <div class="ml-1">
-                            <label for="pentoempty-prog" class="font-bold text-teal-900 text-sm cursor-pointer block select-none">整支筆用到完 (預設)</label>
-                            <p class="text-teal-700 mt-0.5" style="font-size:11px;">病患購買整數支筆且會用完：最後一支筆的剩餘藥量，以療程結尾(目前使用中)的劑量延長施打至用完，週數、施打次數與針頭數會一併計入。</p>
-                        </div>
-                    </div>
-                    <div class="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-xl">
-                        <div class="flex items-start gap-3">
-                            <input type="checkbox" x-model="progLimitPens" class="mt-1 w-4 h-4 cursor-pointer" id="limitpens-prog"/>
-                            <div class="ml-1 flex-1">
-                                <label for="limitpens-prog" class="font-bold text-purple-900 text-sm cursor-pointer block select-none">指定購買支數</label>
-                                <p class="text-purple-700 mt-0.5" style="font-size:11px;">病患只想買固定支數：照療程劑量順序買滿指定支數、逐週用到完，超過所需的週數就停（不受原療程長度限制）。</p>
-                            </div>
-                        </div>
-                        <div x-show="progLimitPens" class="mt-3 flex items-center gap-2 pl-7" x-transition>
-                            <span class="text-xs font-bold text-purple-700">購買</span>
-                            <button @click="progPenLimit = Math.max(1, (parseInt(progPenLimit)||1) - 1)" class="w-8 h-8 shrink-0 bg-white border border-purple-300 hover:bg-purple-100 rounded-lg text-base font-bold text-purple-600 transition-colors leading-none">−</button>
-                            <input type="number" min="1" max="24" x-model.number="progPenLimit" class="w-14 text-center bg-white border border-purple-300 rounded-lg px-1 py-1.5 text-sm font-extrabold outline-none focus:ring-2 focus:ring-purple-500" />
-                            <button @click="progPenLimit = Math.min(24, (parseInt(progPenLimit)||1) + 1)" class="w-8 h-8 shrink-0 bg-white border border-purple-300 hover:bg-purple-100 rounded-lg text-base font-bold text-purple-600 transition-colors leading-none">＋</button>
-                            <span class="text-xs font-bold text-purple-700">支</span>
-                        </div>
-                    </div>
-                    <div class="space-y-3">
-                        <button @click="setProgStrategy('balanced')" :class="progStrategy==='balanced'?'border-green-500 bg-green-50 shadow-sm':'border-gray-200 bg-white hover:bg-gray-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
-                            <div class="font-bold text-sm flex items-center gap-2"><svg width="16" height="16" :class="progStrategy==='balanced'?'text-green-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>平衡花費 (推薦)</div>
+                    <div class="space-y-2.5 mb-5">
+                        <button @click="setProgStrategy('balanced')" :class="progStrategy==='balanced'?'border-green-500 bg-green-50 shadow-sm ring-1 ring-green-200':'border-gray-200 bg-white hover:bg-gray-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
+                            <div class="w-full font-bold text-sm flex items-center gap-2"><svg width="16" height="16" class="shrink-0" :class="progStrategy==='balanced'?'text-green-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg><span>平衡花費</span><span class="ml-auto text-white bg-green-500 px-2 py-0.5 rounded-full" style="font-size:10px;">推薦</span></div>
                             <div class="text-gray-500 mt-1" style="font-size:11px;">智慧跨階購買大容量筆針來拆打省錢，嚴守不倒退原則，且確保每支筆開封不超過指定的合理時間。</div>
                         </button>
                         <div x-show="progStrategy==='balanced'" class="px-4 py-3 bg-white border border-green-200 rounded-lg" x-transition>
@@ -768,14 +746,55 @@
                             <input type="range" min="4" max="8" step="1" x-model.number="progMaxWeeks" class="w-full" style="accent-color:#10B981;" />
                             <div class="flex justify-between text-gray-400 mt-1 px-1" style="font-size:10px;"><span>4週 (嚴格)</span><span>8週 (寬鬆)</span></div>
                         </div>
-                        <button @click="setProgStrategy('max')" :class="progStrategy==='max'?'border-indigo-500 bg-indigo-50 shadow-sm':'border-gray-200 bg-white hover:bg-gray-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
-                            <div class="font-bold text-sm flex items-center gap-2"><svg width="16" height="16" :class="progStrategy==='max'?'text-indigo-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M19 5c-1.5 0-2.8 1.4-3 2-3.5-1.5-11-.3-11 5 0 1.8 0 3 2 4.5V20a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-1a5 5 0 0 0 5 0v1a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-3.5c2-1.5 2-2.7 2-4.5 0-5.3-7.5-6.5-11-5"/><path d="M7 14h.01"/><path d="M11 11h.01"/></svg>極致省錢</div>
+                        <button @click="setProgStrategy('max')" :class="progStrategy==='max'?'border-indigo-500 bg-indigo-50 shadow-sm ring-1 ring-indigo-200':'border-gray-200 bg-white hover:bg-gray-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
+                            <div class="font-bold text-sm flex items-center gap-2"><svg width="16" height="16" class="shrink-0" :class="progStrategy==='max'?'text-indigo-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M19 5c-1.5 0-2.8 1.4-3 2-3.5-1.5-11-.3-11 5 0 1.8 0 3 2 4.5V20a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-1a5 5 0 0 0 5 0v1a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-3.5c2-1.5 2-2.7 2-4.5 0-5.3-7.5-6.5-11-5"/><path d="M7 14h.01"/><path d="M11 11h.01"/></svg>極致省錢</div>
                             <div class="text-gray-500 mt-1" style="font-size:11px;">全程買最大容量。總支付花費最低，但初期單支可能需打超過2個月。</div>
                         </button>
-                        <button @click="setProgStrategy('standard')" :class="progStrategy==='standard'?'border-blue-500 bg-blue-50 shadow-sm':'border-gray-200 bg-white hover:bg-gray-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
-                            <div class="font-bold text-sm flex items-center gap-2"><svg width="16" height="16" :class="progStrategy==='standard'?'text-blue-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg>原廠標準</div>
+                        <button @click="setProgStrategy('standard')" :class="progStrategy==='standard'?'border-blue-500 bg-blue-50 shadow-sm ring-1 ring-blue-200':'border-gray-200 bg-white hover:bg-gray-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
+                            <div class="font-bold text-sm flex items-center gap-2"><svg width="16" height="16" class="shrink-0" :class="progStrategy==='standard'?'text-blue-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg>原廠標準</div>
                             <div class="text-gray-500 mt-1" style="font-size:11px;">打多少買多少，確保筆針最新鮮。總花費通常較高。</div>
                         </button>
+                    </div>
+
+                    <!-- STEP 2：進階選項 -->
+                    <div class="flex items-center gap-2 mb-3">
+                        <span class="flex items-center justify-center w-6 h-6 rounded-full bg-gray-300 text-gray-700 shrink-0" style="font-size:13px;font-weight:800;">2</span>
+                        <div class="leading-tight">
+                            <span class="block text-sm font-bold text-gray-800">進階選項 <span class="text-gray-400 font-normal">（可略過）</span></span>
+                            <span class="text-gray-400" style="font-size:11px;">不確定就保持預設，多數情況免調整</span>
+                        </div>
+                    </div>
+                    <div class="space-y-2">
+                        <label class="flex items-start gap-2.5 p-2.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg cursor-pointer transition-colors">
+                            <input type="checkbox" x-model="isFirstConservative" class="mt-0.5 w-4 h-4 cursor-pointer shrink-0" style="accent-color:#D97706;"/>
+                            <div class="flex-1 min-w-0">
+                                <div class="font-bold text-gray-800 text-sm flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-yellow-500 shrink-0"></span>初次保守使用</div>
+                                <p class="text-gray-500 mt-0.5" style="font-size:11px;">強制第 1 支筆購買最便宜的入門價位筆針，降低初期適應不良的浪費風險。</p>
+                            </div>
+                        </label>
+                        <label class="flex items-start gap-2.5 p-2.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg cursor-pointer transition-colors">
+                            <input type="checkbox" x-model="penToEmpty" class="mt-0.5 w-4 h-4 cursor-pointer shrink-0" style="accent-color:#0D9488;"/>
+                            <div class="flex-1 min-w-0">
+                                <div class="font-bold text-gray-800 text-sm flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-teal-500 shrink-0"></span>整支筆用到完 <span class="text-gray-400 font-normal" style="font-size:10px;">(預設開啟)</span></div>
+                                <p class="text-gray-500 mt-0.5" style="font-size:11px;">最後一支筆的剩餘藥量，以療程結尾劑量延長施打至用完，週數、施打次數與針頭數會一併計入。</p>
+                            </div>
+                        </label>
+                        <div class="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
+                            <label class="flex items-start gap-2.5 p-2.5 hover:bg-gray-100 cursor-pointer transition-colors">
+                                <input type="checkbox" x-model="progLimitPens" class="mt-0.5 w-4 h-4 cursor-pointer shrink-0" style="accent-color:#7C3AED;"/>
+                                <div class="flex-1 min-w-0">
+                                    <div class="font-bold text-gray-800 text-sm flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0"></span>指定購買支數</div>
+                                    <p class="text-gray-500 mt-0.5" style="font-size:11px;">病患只想買固定支數：照療程劑量順序買滿指定支數、用到完，超過所需週數就停。</p>
+                                </div>
+                            </label>
+                            <div x-show="progLimitPens" class="flex items-center gap-2 px-3 pb-3 pt-1 pl-9" x-transition>
+                                <span class="text-xs font-bold text-purple-700">購買</span>
+                                <button @click="progPenLimit = Math.max(1, (parseInt(progPenLimit)||1) - 1)" class="w-8 h-8 shrink-0 bg-white border border-purple-300 hover:bg-purple-100 rounded-lg text-base font-bold text-purple-600 transition-colors leading-none">−</button>
+                                <input type="number" min="1" max="24" x-model.number="progPenLimit" class="w-14 text-center bg-white border border-purple-300 rounded-lg px-1 py-1.5 text-sm font-extrabold outline-none focus:ring-2 focus:ring-purple-500" />
+                                <button @click="progPenLimit = Math.min(24, (parseInt(progPenLimit)||1) + 1)" class="w-8 h-8 shrink-0 bg-white border border-purple-300 hover:bg-purple-100 rounded-lg text-base font-bold text-purple-600 transition-colors leading-none">＋</button>
+                                <span class="text-xs font-bold text-purple-700">支</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -856,40 +875,17 @@
                     <p x-show="customSubsidy!=='none'" class="text-blue-600 mt-2 ml-1" style="font-size:11px;">✓ 系統將自動把贈送的免費筆排入後續的施打計畫中</p>
                 </div>
                 <div class="pt-5 border-t border-gray-100 mt-5">
-                    <label class="block text-sm font-bold text-gray-600 mb-3">一鍵自動購筆策略</label>
-                    <div class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start gap-3">
-                        <input type="checkbox" x-model="isFirstConservative" class="mt-1 w-4 h-4 cursor-pointer" id="conservative-custom"/>
-                        <div class="ml-1">
-                            <label for="conservative-custom" class="font-bold text-yellow-900 text-sm cursor-pointer block select-none">初次保守使用</label>
-                            <p class="text-yellow-700 mt-0.5" style="font-size:11px;">強制第 1 支筆購買最便宜的入門價位筆針，降低初期適應不良的浪費風險。</p>
+                    <!-- STEP 1：採購策略 -->
+                    <div class="flex items-center gap-2 mb-3">
+                        <span class="flex items-center justify-center w-6 h-6 rounded-full bg-gray-800 text-white shrink-0" style="font-size:13px;font-weight:800;">1</span>
+                        <div class="leading-tight">
+                            <span class="block text-sm font-bold text-gray-800">選擇採購策略</span>
+                            <span class="text-gray-400" style="font-size:11px;">三選一 · 新手直接用「推薦」即可</span>
                         </div>
                     </div>
-                    <div class="mb-4 p-3 bg-teal-50 border border-teal-200 rounded-xl flex items-start gap-3">
-                        <input type="checkbox" x-model="penToEmpty" class="mt-1 w-4 h-4 cursor-pointer" id="pentoempty-custom"/>
-                        <div class="ml-1">
-                            <label for="pentoempty-custom" class="font-bold text-teal-900 text-sm cursor-pointer block select-none">整支筆用到完 (預設)</label>
-                            <p class="text-teal-700 mt-0.5" style="font-size:11px;">病患購買整數支筆且會用完：最後一支筆的剩餘藥量，以療程結尾(目前使用中)的劑量延長施打至用完，週數、施打次數與針頭數會一併計入。</p>
-                        </div>
-                    </div>
-                    <div class="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-xl">
-                        <div class="flex items-start gap-3">
-                            <input type="checkbox" x-model="customLimitPens" class="mt-1 w-4 h-4 cursor-pointer" id="limitpens-custom"/>
-                            <div class="ml-1 flex-1">
-                                <label for="limitpens-custom" class="font-bold text-purple-900 text-sm cursor-pointer block select-none">指定購買支數</label>
-                                <p class="text-purple-700 mt-0.5" style="font-size:11px;">病患只想買固定支數：照療程劑量順序買滿指定支數、逐週用到完，超過所需的週數就停（不受原療程長度限制）。</p>
-                            </div>
-                        </div>
-                        <div x-show="customLimitPens" class="mt-3 flex items-center gap-2 pl-7" x-transition>
-                            <span class="text-xs font-bold text-purple-700">購買</span>
-                            <button @click="customPenLimit = Math.max(1, (parseInt(customPenLimit)||1) - 1)" class="w-8 h-8 shrink-0 bg-white border border-purple-300 hover:bg-purple-100 rounded-lg text-base font-bold text-purple-600 transition-colors leading-none">−</button>
-                            <input type="number" min="1" max="24" x-model.number="customPenLimit" class="w-14 text-center bg-white border border-purple-300 rounded-lg px-1 py-1.5 text-sm font-extrabold outline-none focus:ring-2 focus:ring-purple-500" />
-                            <button @click="customPenLimit = Math.min(24, (parseInt(customPenLimit)||1) + 1)" class="w-8 h-8 shrink-0 bg-white border border-purple-300 hover:bg-purple-100 rounded-lg text-base font-bold text-purple-600 transition-colors leading-none">＋</button>
-                            <span class="text-xs font-bold text-purple-700">支</span>
-                        </div>
-                    </div>
-                    <div class="space-y-3">
-                        <button @click="setCustomStrategy('balanced')" :class="customStrategy==='balanced'?'border-green-500 bg-green-50 shadow-sm':'border-gray-200 bg-white hover:bg-slate-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
-                            <div class="font-bold text-sm flex items-center gap-2"><svg width="16" height="16" :class="customStrategy==='balanced'?'text-green-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>平衡花費 (推薦)</div>
+                    <div class="space-y-2.5 mb-5">
+                        <button @click="setCustomStrategy('balanced')" :class="customStrategy==='balanced'?'border-green-500 bg-green-50 shadow-sm ring-1 ring-green-200':'border-gray-200 bg-white hover:bg-slate-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
+                            <div class="w-full font-bold text-sm flex items-center gap-2"><svg width="16" height="16" class="shrink-0" :class="customStrategy==='balanced'?'text-green-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg><span>平衡花費</span><span class="ml-auto text-white bg-green-500 px-2 py-0.5 rounded-full" style="font-size:10px;">推薦</span></div>
                             <div class="text-gray-500 mt-1" style="font-size:11px;">智慧跨階購買大容量筆針來拆打省錢，嚴守不倒退原則，且確保每支筆開封不超過指定的合理時間。</div>
                         </button>
                         <div x-show="customStrategy==='balanced'" class="px-4 py-3 bg-white border border-green-200 rounded-lg" x-transition>
@@ -897,14 +893,55 @@
                             <input type="range" min="4" max="8" step="1" x-model.number="customMaxWeeks" class="w-full" style="accent-color:#10B981;" />
                             <div class="flex justify-between text-gray-400 mt-1 px-1" style="font-size:10px;"><span>4週 (嚴格)</span><span>8週 (寬鬆)</span></div>
                         </div>
-                        <button @click="setCustomStrategy('max')" :class="customStrategy==='max'?'border-indigo-500 bg-indigo-50 shadow-sm':'border-gray-200 bg-white hover:bg-slate-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
-                            <div class="font-bold text-sm flex items-center gap-2"><svg width="16" height="16" :class="customStrategy==='max'?'text-indigo-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M19 5c-1.5 0-2.8 1.4-3 2-3.5-1.5-11-.3-11 5 0 1.8 0 3 2 4.5V20a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-1a5 5 0 0 0 5 0v1a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-3.5c2-1.5 2-2.7 2-4.5 0-5.3-7.5-6.5-11-5"/><path d="M7 14h.01"/><path d="M11 11h.01"/></svg>極致省錢</div>
+                        <button @click="setCustomStrategy('max')" :class="customStrategy==='max'?'border-indigo-500 bg-indigo-50 shadow-sm ring-1 ring-indigo-200':'border-gray-200 bg-white hover:bg-slate-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
+                            <div class="font-bold text-sm flex items-center gap-2"><svg width="16" height="16" class="shrink-0" :class="customStrategy==='max'?'text-indigo-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M19 5c-1.5 0-2.8 1.4-3 2-3.5-1.5-11-.3-11 5 0 1.8 0 3 2 4.5V20a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-1a5 5 0 0 0 5 0v1a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-3.5c2-1.5 2-2.7 2-4.5 0-5.3-7.5-6.5-11-5"/><path d="M7 14h.01"/><path d="M11 11h.01"/></svg>極致省錢</div>
                             <div class="text-gray-500 mt-1" style="font-size:11px;">全程買最大容量。總支付花費最低，但初期單支可能需打超過2個月。</div>
                         </button>
-                        <button @click="setCustomStrategy('standard')" :class="customStrategy==='standard'?'border-blue-500 bg-blue-50 shadow-sm':'border-gray-200 bg-white hover:bg-gray-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
-                            <div class="font-bold text-sm flex items-center gap-2"><svg width="16" height="16" :class="customStrategy==='standard'?'text-blue-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg>原廠標準</div>
+                        <button @click="setCustomStrategy('standard')" :class="customStrategy==='standard'?'border-blue-500 bg-blue-50 shadow-sm ring-1 ring-blue-200':'border-gray-200 bg-white hover:bg-gray-50'" class="w-full flex flex-col items-start p-3 rounded-xl border text-left transition-all">
+                            <div class="font-bold text-sm flex items-center gap-2"><svg width="16" height="16" class="shrink-0" :class="customStrategy==='standard'?'text-blue-600':'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg>原廠標準</div>
                             <div class="text-gray-500 mt-1" style="font-size:11px;">打多少買多少，確保筆針最新鮮。總花費通常較高。</div>
                         </button>
+                    </div>
+
+                    <!-- STEP 2：進階選項 -->
+                    <div class="flex items-center gap-2 mb-3">
+                        <span class="flex items-center justify-center w-6 h-6 rounded-full bg-gray-300 text-gray-700 shrink-0" style="font-size:13px;font-weight:800;">2</span>
+                        <div class="leading-tight">
+                            <span class="block text-sm font-bold text-gray-800">進階選項 <span class="text-gray-400 font-normal">（可略過）</span></span>
+                            <span class="text-gray-400" style="font-size:11px;">不確定就保持預設，多數情況免調整</span>
+                        </div>
+                    </div>
+                    <div class="space-y-2">
+                        <label class="flex items-start gap-2.5 p-2.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg cursor-pointer transition-colors">
+                            <input type="checkbox" x-model="isFirstConservative" class="mt-0.5 w-4 h-4 cursor-pointer shrink-0" style="accent-color:#D97706;"/>
+                            <div class="flex-1 min-w-0">
+                                <div class="font-bold text-gray-800 text-sm flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-yellow-500 shrink-0"></span>初次保守使用</div>
+                                <p class="text-gray-500 mt-0.5" style="font-size:11px;">強制第 1 支筆購買最便宜的入門價位筆針，降低初期適應不良的浪費風險。</p>
+                            </div>
+                        </label>
+                        <label class="flex items-start gap-2.5 p-2.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg cursor-pointer transition-colors">
+                            <input type="checkbox" x-model="penToEmpty" class="mt-0.5 w-4 h-4 cursor-pointer shrink-0" style="accent-color:#0D9488;"/>
+                            <div class="flex-1 min-w-0">
+                                <div class="font-bold text-gray-800 text-sm flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-teal-500 shrink-0"></span>整支筆用到完 <span class="text-gray-400 font-normal" style="font-size:10px;">(預設開啟)</span></div>
+                                <p class="text-gray-500 mt-0.5" style="font-size:11px;">最後一支筆的剩餘藥量，以療程結尾劑量延長施打至用完，週數、施打次數與針頭數會一併計入。</p>
+                            </div>
+                        </label>
+                        <div class="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
+                            <label class="flex items-start gap-2.5 p-2.5 hover:bg-gray-100 cursor-pointer transition-colors">
+                                <input type="checkbox" x-model="customLimitPens" class="mt-0.5 w-4 h-4 cursor-pointer shrink-0" style="accent-color:#7C3AED;"/>
+                                <div class="flex-1 min-w-0">
+                                    <div class="font-bold text-gray-800 text-sm flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0"></span>指定購買支數</div>
+                                    <p class="text-gray-500 mt-0.5" style="font-size:11px;">病患只想買固定支數：照療程劑量順序買滿指定支數、用到完，超過所需週數就停。</p>
+                                </div>
+                            </label>
+                            <div x-show="customLimitPens" class="flex items-center gap-2 px-3 pb-3 pt-1 pl-9" x-transition>
+                                <span class="text-xs font-bold text-purple-700">購買</span>
+                                <button @click="customPenLimit = Math.max(1, (parseInt(customPenLimit)||1) - 1)" class="w-8 h-8 shrink-0 bg-white border border-purple-300 hover:bg-purple-100 rounded-lg text-base font-bold text-purple-600 transition-colors leading-none">−</button>
+                                <input type="number" min="1" max="24" x-model.number="customPenLimit" class="w-14 text-center bg-white border border-purple-300 rounded-lg px-1 py-1.5 text-sm font-extrabold outline-none focus:ring-2 focus:ring-purple-500" />
+                                <button @click="customPenLimit = Math.min(24, (parseInt(customPenLimit)||1) + 1)" class="w-8 h-8 shrink-0 bg-white border border-purple-300 hover:bg-purple-100 rounded-lg text-base font-bold text-purple-600 transition-colors leading-none">＋</button>
+                                <span class="text-xs font-bold text-purple-700">支</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
