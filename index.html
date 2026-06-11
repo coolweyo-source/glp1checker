@@ -1,6 +1,18 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
+    <script>
+    // 停用右鍵
+    document.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+    });
+    // 停用 F12, Ctrl+Shift+I (開發者工具)
+    document.addEventListener('keydown', function(e) {
+        if (e.keyCode == 123 || (e.ctrlKey && e.shiftKey && e.keyCode == 73)) {
+            e.preventDefault();
+        }
+    });
+</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>減重筆針精算與療程規劃器</title>
